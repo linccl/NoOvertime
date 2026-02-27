@@ -13,7 +13,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	apperrors "noovertime/internal/errors"
@@ -197,21 +196,10 @@ type syncCommitConflictResponse struct {
 	RequestID  string `json:"request_id"`
 }
 
-type syncCommitGate struct {
-	mu            sync.Mutex
-	records       map[string]syncCommitGateRecord
-	writerByUser  map[string]writerState
-	versionByUser map[string]int64
-}
-
 type syncCommitGateRecord struct {
 	PayloadHash string
+	Status      string
 	CreatedAt   time.Time
-}
-
-type writerState struct {
-	DeviceID    string
-	WriterEpoch int64
 }
 
 type syncCommitGateDecision struct {
@@ -220,141 +208,195 @@ type syncCommitGateDecision struct {
 	Record    syncCommitGateRecord
 	ErrorCode string
 	Message   string
-
-	GateRecordCreated  bool
-	VersionUpdated     bool
-	WriterCreated      bool
-	HadPreviousVersion bool
-	PreviousVersion    int64
 }
 
-func newSyncCommitGate() *syncCommitGate {
-	return &syncCommitGate{
-		records:       make(map[string]syncCommitGateRecord),
-		writerByUser:  make(map[string]writerState),
-		versionByUser: make(map[string]int64),
+func gateAndPersistSyncCommit(ctx context.Context, db HealthChecker, input SyncCommitInput, now time.Time) (syncCommitGateDecision, error) {
+	txDB, ok := db.(syncCommitTxDB)
+	if !ok {
+		return syncCommitGateDecision{}, fmt.Errorf("database does not support sync commit transactions")
 	}
-}
 
-func (g *syncCommitGate) evaluate(input SyncCommitInput, now time.Time) syncCommitGateDecision {
-	key := input.UserID + "|" + input.SyncID
+	var decision syncCommitGateDecision
+	if err := txDB.WithTx(ctx, func(tx pgx.Tx) error {
+		createdAt := now.UTC()
+		record, inserted, err := tryInsertSyncCommitRecord(ctx, tx, input, createdAt)
+		if err != nil {
+			return err
+		}
 
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	if existing, ok := g.records[key]; ok {
-		if existing.PayloadHash == input.PayloadHash {
-			return syncCommitGateDecision{
-				Result: gateResultNoop,
-				Reason: gateReasonReplayNoop,
-				Record: existing,
+		if !inserted {
+			existing, err := loadSyncCommitRecord(ctx, tx, input.UserID, input.SyncID)
+			if err != nil {
+				return err
 			}
-		}
-		return syncCommitGateDecision{
-			Result:    gateResultRejected,
-			Reason:    gateReasonSyncIDConflict,
-			ErrorCode: syncIDConflictCode,
-			Message:   "same sync_id but different payload_hash",
-			Record:    existing,
-		}
-	}
-
-	writerCreated := false
-	if writer, exists := g.writerByUser[input.UserID]; exists {
-		if writer.DeviceID != input.DeviceID || writer.WriterEpoch != input.WriterEpoch {
-			return syncCommitGateDecision{
+			if existing.PayloadHash == input.PayloadHash {
+				decision = syncCommitGateDecision{
+					Result: gateResultNoop,
+					Reason: gateReasonReplayNoop,
+					Record: existing,
+				}
+				return nil
+			}
+			decision = syncCommitGateDecision{
 				Result:    gateResultRejected,
-				Reason:    staleWriterRejectedCode,
-				ErrorCode: staleWriterRejectedCode,
-				Message:   "device_id or writer_epoch does not match current writer",
+				Reason:    gateReasonSyncIDConflict,
+				Record:    existing,
+				ErrorCode: syncIDConflictCode,
+				Message:   "same sync_id but different payload_hash",
 			}
+			return nil
 		}
-	} else {
-		g.writerByUser[input.UserID] = writerState{
-			DeviceID:    input.DeviceID,
-			WriterEpoch: input.WriterEpoch,
+
+		shouldApply, err := shouldApplySyncCommit(ctx, tx, input)
+		if err != nil {
+			return err
 		}
-		writerCreated = true
+		if !shouldApply {
+			decision = syncCommitGateDecision{
+				Result: gateResultNoop,
+				Reason: gateReasonLowOrEqual,
+				Record: record,
+			}
+			return nil
+		}
+
+		if err := validateSyncBusinessRules(input); err != nil {
+			return err
+		}
+
+		exec := pgxSyncCommitTxExecutor{tx: tx}
+		if err := writePunchRecords(ctx, exec, input); err != nil {
+			return fmt.Errorf("write punch_records: %w", err)
+		}
+		if err := writeLeaveRecords(ctx, exec, input); err != nil {
+			return fmt.Errorf("write leave_records: %w", err)
+		}
+		if err := writeDaySummaries(ctx, exec, input); err != nil {
+			return fmt.Errorf("write day_summaries: %w", err)
+		}
+		if err := writeMonthSummaries(ctx, exec, input); err != nil {
+			return fmt.Errorf("write month_summaries: %w", err)
+		}
+
+		decision = syncCommitGateDecision{
+			Result: gateResultApplied,
+			Reason: gateReasonAppliedWrite,
+			Record: record,
+		}
+		return nil
+	}); err != nil {
+		return syncCommitGateDecision{}, err
 	}
 
-	incomingMaxVersion := maxIncomingVersion(input)
-	currentMaxVersion, hasCurrentVersion := g.versionByUser[input.UserID]
-	record := syncCommitGateRecord{
-		PayloadHash: input.PayloadHash,
-		CreatedAt:   now.UTC(),
-	}
-
-	if incomingMaxVersion <= currentMaxVersion {
-		g.records[key] = record
-		return syncCommitGateDecision{
-			Result:            gateResultNoop,
-			Reason:            gateReasonLowOrEqual,
-			Record:            record,
-			GateRecordCreated: true,
-			WriterCreated:     writerCreated,
-		}
-	}
-
-	g.records[key] = record
-	g.versionByUser[input.UserID] = incomingMaxVersion
-	return syncCommitGateDecision{
-		GateRecordCreated:  true,
-		VersionUpdated:     true,
-		WriterCreated:      writerCreated,
-		Result:             gateResultApplied,
-		Reason:             gateReasonAppliedWrite,
-		Record:             record,
-		HadPreviousVersion: hasCurrentVersion,
-		PreviousVersion:    currentMaxVersion,
-	}
+	return decision, nil
 }
 
-func (g *syncCommitGate) rollbackDecision(input SyncCommitInput, decision syncCommitGateDecision) {
-	if !decision.GateRecordCreated {
-		return
-	}
-
-	key := input.UserID + "|" + input.SyncID
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	delete(g.records, key)
-	if decision.VersionUpdated {
-		if decision.HadPreviousVersion {
-			g.versionByUser[input.UserID] = decision.PreviousVersion
-		} else {
-			delete(g.versionByUser, input.UserID)
+func tryInsertSyncCommitRecord(ctx context.Context, tx pgx.Tx, input SyncCommitInput, createdAt time.Time) (syncCommitGateRecord, bool, error) {
+	const query = `
+INSERT INTO sync_commits (
+	user_id, device_id, writer_epoch, sync_id, payload_hash, status, created_at, applied_at
+) VALUES (
+	$1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7, $8
+)
+ON CONFLICT (user_id, sync_id) DO NOTHING
+RETURNING payload_hash, status, created_at
+`
+	var record syncCommitGateRecord
+	if err := tx.QueryRow(ctx, query,
+		input.UserID,
+		input.DeviceID,
+		input.WriterEpoch,
+		input.SyncID,
+		input.PayloadHash,
+		syncCommitStatusApplied,
+		createdAt,
+		createdAt,
+	).Scan(&record.PayloadHash, &record.Status, &record.CreatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return syncCommitGateRecord{}, false, nil
 		}
+		return syncCommitGateRecord{}, false, err
 	}
-
-	if decision.WriterCreated {
-		delete(g.writerByUser, input.UserID)
-	}
+	return record, true, nil
 }
 
-func maxIncomingVersion(input SyncCommitInput) int64 {
-	maxVersion := int64(0)
+func loadSyncCommitRecord(ctx context.Context, tx pgx.Tx, userID, syncID string) (syncCommitGateRecord, error) {
+	const query = `
+SELECT payload_hash, status, created_at
+  FROM sync_commits
+ WHERE user_id = $1::uuid
+   AND sync_id = $2::uuid
+`
+	var record syncCommitGateRecord
+	if err := tx.QueryRow(ctx, query, userID, syncID).Scan(&record.PayloadHash, &record.Status, &record.CreatedAt); err != nil {
+		return syncCommitGateRecord{}, err
+	}
+	return record, nil
+}
+
+func shouldApplySyncCommit(ctx context.Context, tx pgx.Tx, input SyncCommitInput) (bool, error) {
 	for _, record := range input.PunchRecords {
-		if record.Version > maxVersion {
-			maxVersion = record.Version
+		higher, err := hasHigherVersion(ctx, tx, "punch_records", input.UserID, record.ID, record.Version)
+		if err != nil {
+			return false, err
+		}
+		if higher {
+			return true, nil
 		}
 	}
 	for _, record := range input.LeaveRecords {
-		if record.Version > maxVersion {
-			maxVersion = record.Version
+		higher, err := hasHigherVersion(ctx, tx, "leave_records", input.UserID, record.ID, record.Version)
+		if err != nil {
+			return false, err
+		}
+		if higher {
+			return true, nil
 		}
 	}
 	for _, record := range input.DaySummaries {
-		if record.Version > maxVersion {
-			maxVersion = record.Version
+		higher, err := hasHigherVersion(ctx, tx, "day_summaries", input.UserID, record.ID, record.Version)
+		if err != nil {
+			return false, err
+		}
+		if higher {
+			return true, nil
 		}
 	}
 	for _, record := range input.MonthSummaries {
-		if record.Version > maxVersion {
-			maxVersion = record.Version
+		higher, err := hasHigherVersion(ctx, tx, "month_summaries", input.UserID, record.ID, record.Version)
+		if err != nil {
+			return false, err
+		}
+		if higher {
+			return true, nil
 		}
 	}
-	return maxVersion
+	return false, nil
+}
+
+func hasHigherVersion(ctx context.Context, tx pgx.Tx, table, userID, recordID string, incomingVersion int64) (bool, error) {
+	var query string
+	switch table {
+	case "punch_records":
+		query = `SELECT version FROM punch_records WHERE user_id = $1::uuid AND id = $2::uuid`
+	case "leave_records":
+		query = `SELECT version FROM leave_records WHERE user_id = $1::uuid AND id = $2::uuid`
+	case "day_summaries":
+		query = `SELECT version FROM day_summaries WHERE user_id = $1::uuid AND id = $2::uuid`
+	case "month_summaries":
+		query = `SELECT version FROM month_summaries WHERE user_id = $1::uuid AND id = $2::uuid`
+	default:
+		return false, fmt.Errorf("unsupported version gate table %q", table)
+	}
+
+	var existingVersion int64
+	if err := tx.QueryRow(ctx, query, userID, recordID).Scan(&existingVersion); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return true, nil
+		}
+		return false, err
+	}
+	return incomingVersion > existingVersion, nil
 }
 
 func (s *Server) syncCommitsHandler(w http.ResponseWriter, r *http.Request) error {
@@ -372,7 +414,25 @@ func (s *Server) syncCommitsHandler(w http.ResponseWriter, r *http.Request) erro
 		requestID = generateRequestID()
 	}
 
-	decision := s.syncGate.evaluate(input, time.Now())
+	decision, err := gateAndPersistSyncCommit(r.Context(), s.db, input, s.now())
+	if err != nil {
+		var apiErr apperrors.APIError
+		if errors.As(err, &apiErr) {
+			return apiErr
+		}
+
+		mappedErr, mappedConflict, ok := mapSyncCommitPersistenceError(err, requestID)
+		if ok {
+			if mappedConflict != nil {
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				w.WriteHeader(http.StatusConflict)
+				return json.NewEncoder(w).Encode(*mappedConflict)
+			}
+			return mappedErr
+		}
+
+		return apperrors.New(http.StatusInternalServerError, internalErrorCode, internalErrorMessage)
+	}
 	log.Printf(
 		"sync_commit_gate user_id=%s sync_id=%s gate_result=%s gate_reason=%s request_id=%s",
 		input.UserID,
@@ -385,10 +445,6 @@ func (s *Server) syncCommitsHandler(w http.ResponseWriter, r *http.Request) erro
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
 	if decision.Result == gateResultRejected {
-		if decision.ErrorCode == staleWriterRejectedCode {
-			return apperrors.New(http.StatusConflict, staleWriterRejectedCode, decision.Message)
-		}
-
 		w.WriteHeader(http.StatusConflict)
 		return json.NewEncoder(w).Encode(syncCommitConflictResponse{
 			ErrorCode:  syncIDConflictCode,
@@ -399,28 +455,6 @@ func (s *Server) syncCommitsHandler(w http.ResponseWriter, r *http.Request) erro
 		})
 	}
 
-	if decision.Result == gateResultApplied {
-		if err := validateSyncBusinessRules(input); err != nil {
-			s.syncGate.rollbackDecision(input, decision)
-			return err
-		}
-	}
-
-	if err := persistSyncCommitTransaction(r.Context(), s.db, input, decision); err != nil {
-		s.syncGate.rollbackDecision(input, decision)
-
-		mappedErr, mappedConflict, ok := mapSyncCommitPersistenceError(err, requestID)
-		if ok {
-			if mappedConflict != nil {
-				w.WriteHeader(http.StatusConflict)
-				return json.NewEncoder(w).Encode(*mappedConflict)
-			}
-			return mappedErr
-		}
-
-		return apperrors.New(http.StatusInternalServerError, internalErrorCode, internalErrorMessage)
-	}
-
 	w.WriteHeader(http.StatusOK)
 	return json.NewEncoder(w).Encode(syncCommitResponse{
 		RequestID:  requestID,
@@ -428,7 +462,7 @@ func (s *Server) syncCommitsHandler(w http.ResponseWriter, r *http.Request) erro
 		GateReason: decision.Reason,
 		SyncCommit: syncCommitResultBody{
 			SyncID:    input.SyncID,
-			Status:    syncCommitStatusApplied,
+			Status:    decision.Record.Status,
 			CreatedAt: decision.Record.CreatedAt.UTC().Format(time.RFC3339),
 		},
 	})
@@ -1176,6 +1210,7 @@ SET
 	deleted_at = EXCLUDED.deleted_at,
 	version = EXCLUDED.version,
 	updated_at = now()
+WHERE EXCLUDED.version > punch_records.version
 `
 	for _, record := range input.PunchRecords {
 		if err := exec.Exec(ctx, query,
@@ -1210,6 +1245,7 @@ SET
 	deleted_at = EXCLUDED.deleted_at,
 	version = EXCLUDED.version,
 	updated_at = now()
+WHERE EXCLUDED.version > leave_records.version
 `
 	for _, record := range input.LeaveRecords {
 		if err := exec.Exec(ctx, query,
@@ -1246,6 +1282,7 @@ SET
 	status = EXCLUDED.status,
 	version = EXCLUDED.version,
 	updated_at = EXCLUDED.updated_at
+WHERE EXCLUDED.version > day_summaries.version
 `
 	for _, record := range input.DaySummaries {
 		if err := exec.Exec(ctx, query,
@@ -1283,6 +1320,7 @@ SET
 	adjust_minutes_balance = EXCLUDED.adjust_minutes_balance,
 	version = EXCLUDED.version,
 	updated_at = EXCLUDED.updated_at
+WHERE EXCLUDED.version > month_summaries.version
 `
 	for _, record := range input.MonthSummaries {
 		if err := exec.Exec(ctx, query,
