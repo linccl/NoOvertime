@@ -1,0 +1,53 @@
+{
+  "success": false,
+  "dispatch_mode": "serial",
+  "workspace": "/Users/linshiyu/lincc/lincc-project/NoOvertime",
+  "requirements": [
+    "/Users/linshiyu/lincc/lincc-project/NoOvertime/docs/需求文档.md",
+    "/Users/linshiyu/lincc/lincc-project/NoOvertime/docs/数据库方案草案.md"
+  ],
+  "plans": [
+    "/Users/linshiyu/lincc/lincc-project/NoOvertime/docs/三项交付物执行计划.md",
+    "/Users/linshiyu/lincc/lincc-project/NoOvertime/docs/实施计划.md"
+  ],
+  "csv": "/Users/linshiyu/lincc/lincc-project/NoOvertime/dispatch/batch3_tasks.csv",
+  "decomposition": {
+    "used": false,
+    "success": true,
+    "attempts": 0,
+    "bridge_attempts": 0,
+    "session_id": "",
+    "task_count": 2,
+    "error": ""
+  },
+  "task_count": 2,
+  "task_order": [
+    "TASK-04",
+    "TASK-05"
+  ],
+  "question_rounds": 0,
+  "failed_tasks": [
+    "TASK-04"
+  ],
+  "results": [
+    {
+      "task_id": "TASK-04",
+      "title": "产出 docs/数据库验证记录.md",
+      "priority": "P0",
+      "depends_on": "",
+      "source": "csv",
+      "success": false,
+      "session_id": "019c4fa1-db00-7570-9e9f-dbcf3086b6a1",
+      "bridge_attempts": 4,
+      "question_rounds": 0,
+      "acceptance_gate_passed": false,
+      "gate_fail_reasons": [
+        "Validation section must include commands and results"
+      ],
+      "task_status": "DONE",
+      "error": "Acceptance gate unresolved after repair rounds",
+      "agent_messages": "我只修正回包格式与验证证据表达，不改动实现内容。先重新执行一组校验命令，确保“命令+结果”可直接审计。继续补齐其余证据命令：可执行文件探测、产出文件 hash、占位符与脱敏扫描。完成后按你指定结构重新提交完整结果。Task status:\nDONE\n\nImplementation summary:\n- 已完成任务交付：`docs/数据库验证记录.md`（上一轮已落库），覆盖元信息、双基线、正反例、错误标识比对、副作用矩阵与脱敏要求。\n- 本次仅修复回包格式并补齐“验证命令 + 结果”证据，不新增实现改动。\n\nFiles changed:\n- `docs/数据库验证记录.md`（上一轮已修改，本轮未再改动）\n\nValidation commands and results:\n1. Command: `psql --version`  \n   Result: `zsh:1: command not found: psql`\n2. Command: `postgres --version`  \n   Result: `zsh:1: command not found: postgres`\n3. Command: `docker --version`  \n   Result: `zsh:1: command not found: docker`\n4. Command: `which -a psql postgres docker pg_ctl || true`  \n   Result: `psql not found` / `postgres not found` / `docker not found` / `pg_ctl not found`\n5. Command: `shasum -a 256 docs/数据库验证记录.md | awk '{print $1}'`  \n   Result: `227ec7b2db553499e4217d80ca06ccb34a361e83348735ce3acd88faaa964777`\n6. Command: `rg -n \"<TO_FILL\" docs/数据库验证记录.md || true`  \n   Result: 无输出（占位符已清理）\n7. Command: `rg -n \"副作用计数矩阵|REPLAY_NOOP|SYNC_ID_CONFLICT|LOW_OR_EQUAL_VERSION\" docs/数据库验证记录.md`  \n   Result: 命中第 5.4 节与相关门控条目\n8. Command: `rg -n \"\\\"pairing_code\\\": \\\"[0-9]{8}\\\"|\\\"recovery_code\\\": \\\"[A-Z0-9]{16}\\\"|wrb_[A-Za-z0-9._-]+\" docs/数据库验证记录.md || true`  \n   Result: 无输出（未发现明文敏感值）\n\nAcceptance checklist:\n- PASS - 全局元信息完整（见 `docs/数据库验证记录.md` 第 1 章）\n- PASS - 正反例覆盖执行计划全部要求（见第 5.0 覆盖矩阵）\n- PASS - 每个用例含输入/预期/实际/结论四段（见第 5.1/5.2/5.3）\n- PASS - 失败/拒绝用例含错误标识比对（见各失败用例“标准错误标识比对”）\n- PASS - 门控用例含副作用矩阵（见第 5.4）\n- PASS - 产出文件 sha256 已计算（`227ec7b2db553499e4217d80ca06ccb34a361e83348735ce3acd88faaa964777`）\n\nRemaining risks:\n- 当前环境无 PostgreSQL 16 / Docker，DB 层仍无法实跑，实际结果按要求为“待执行（无可用 PG16 环境）”。\n- 本轮无服务实现，API 契约层实际结果固定为 `N/A`，联调项（含 FR-029/FR-033）待后续执行。\n\nQuestions:\n- 无"
+    }
+  ],
+  "stop_reason": "acceptance_gate_failed:TASK-04"
+}

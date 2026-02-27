@@ -1,0 +1,48 @@
+task_id,title,description,acceptance_criteria,priority,depends_on
+TASK-01,冻结版本快照初始化与上游基线校验,"全程留痕。执行 docs/三项交付物执行计划.md 步骤0：冻结版本快照初始化。
+
+具体要求：
+1. 计算三份上游基线文档的 sha256（使用 shasum -a 256）：
+   - docs/需求文档.md
+   - docs/数据库方案草案.md
+   - docs/实施计划.md
+2. 计算 docs/三项交付物执行计划.md 的 sha256
+3. 检查 docs/沟通进展日志.md 第1章的 latest_snapshot_id 是否与当前 Frozen v1.64 一致
+4. 若版本不一致（当前日志停留在 v1.60），需要：
+   - 追加'版本同步记录'（含版本升级原因、latest_snapshot_id 切换、连续零问题计数重置为 0/3）
+   - 追加'上游基线快照初始化记录'（含 frozen_version=Frozen v1.64 + snapshot_record_time(+08:00) + 三份上游文档 baseline_sha256）
+   - 更新第1章状态，将规则判定基线更新为 Frozen v1.64
+5. 所有时间戳格式为 YYYY-MM-DD HH:mm:ss +08:00
+6. 每条记录必须包含'动作完成时间 + 记录时间'
+
+验收时自行检查：
+- sha256 值可复核
+- 版本号已更新到 v1.64
+- latest_snapshot_id 已对齐
+- 连续零问题计数已重置为 0/3","sha256 值可复核且与实际文件一致；docs/沟通进展日志.md 第1章 latest_snapshot_id 已对齐 Frozen v1.64；连续零问题计数为 0/3；所有记录含动作完成时间和记录时间",P0,
+TASK-02,产出 db/migrations/001_init.sql,"全程留痕。执行 docs/三项交付物执行计划.md 步骤1：产出初始化迁移脚本。
+
+具体要求：
+1. 创建 db/migrations/ 目录及 001_init.sql
+2. 脚本必须在单事务内执行（BEGIN ... COMMIT）
+3. 执行顺序固定：extension -> enum -> table -> index -> function -> trigger
+4. 严格按照 docs/数据库方案草案.md（Draft v0.7）的全部对象定义落地：
+   - CREATE EXTENSION IF NOT EXISTS pgcrypto
+   - 8个枚举类型（punch_type, punch_source, leave_type, device_status, migration_mode, migration_status, summary_status, security_scene）
+   - 8张表（users, devices, punch_records, leave_records, day_summaries, month_summaries, migration_requests, security_attempt_windows, sync_commits, web_read_bindings）
+   - 所有索引（含部分唯一索引）
+   - ALTER TABLE users ADD CONSTRAINT fk_users_writer_device
+   - 所有触发器函数与触发器（打卡成对、配对码重置撤销、迁移状态机、Web绑定版本、同步提交写入端校验、限流窗口归一化、全天请假禁自动打卡双向、打卡/请假归属不可变）
+   - rotate_pairing_code 函数
+5. 所有约束/索引/函数/触发器必须显式命名（禁止依赖数据库默认命名）
+6. 触发器/函数的 RAISE EXCEPTION 必须使用 error_key 前缀格式：
+   RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = '[error_key=<KEY>] ...'
+7. error_key 基线按 docs/数据库方案草案.md 第7.9节定义
+8. 脚本定位为空库初始化一次性脚本，不内置测试种子数据
+
+验收时自行检查：
+- SQL 语法正确性（如有 PostgreSQL 16 环境可实际执行验证）
+- BEGIN...COMMIT 包裹完整
+- 对象顺序正确（无前向引用）
+- 所有 RAISE 使用 error_key 前缀
+- 对象数量与数据库方案草案一致","001_init.sql 语法正确；BEGIN...COMMIT 包裹；对象顺序无前向引用；所有 RAISE 使用 [error_key=XXX] 前缀；对象覆盖数据库方案草案全部定义",P0,TASK-01

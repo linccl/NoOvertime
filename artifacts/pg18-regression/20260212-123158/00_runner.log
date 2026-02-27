@@ -1,0 +1,10 @@
+[2026-02-12 12:31:58 +0800] Step 1/8: connectivity and client probe
+[2026-02-12 12:31:59 +0800] Step 2/8: create fresh databases
+[2026-02-12 12:32:35 +0800] Step 3/8: precheck and PG16 gate
+[2026-02-12 12:32:37 +0800] Warning: server_version_num=180001, outside PG16 gate, continue by --allow-non-pg16
+[2026-02-12 12:32:39 +0800] Step 4/8: first migration run
+[2026-02-12 12:32:49 +0800] Step 5/8: second migration run expected failure
+[2026-02-12 12:32:50 +0800] Step 6/8: rollback drill expected failure + clean check
+[2026-02-12 12:33:01 +0800] Step 7/8: object count check
+[2026-02-12 12:33:02 +0800] Step 8/8: DB case suite + supplemental C09/C10
+[2026-02-12 12:33:21 +0800] Completed. Summary: /Users/linshiyu/lincc/lincc-project/NoOvertime/artifacts/pg16-regression/20260212-123158/99_summary.md

@@ -1,0 +1,8 @@
+which psql
+/opt/homebrew/opt/libpq/bin/psql
+
+psql --version
+psql (PostgreSQL) 18.1
+
+nc -vz -w 5 45.207.209.114 5432
+nc: connectx to 45.207.209.114 port 5432 (tcp) failed: Operation not permitted

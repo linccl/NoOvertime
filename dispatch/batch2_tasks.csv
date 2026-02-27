@@ -1,0 +1,46 @@
+task_id,title,description,acceptance_criteria,priority,depends_on
+TASK-03,产出 docs/API契约草案.md,"全程留痕。执行 docs/三项交付物执行计划.md 步骤2：产出 API 契约草案。
+
+你必须严格按照 docs/三项交付物执行计划.md 第4章步骤2的全部要求落地。参考 docs/需求文档.md 的 FR 列表和 docs/数据库方案草案.md 的表结构与触发器。参考 db/migrations/001_init.sql 中的实际 error_key。
+
+覆盖接口（必须全部包含）：
+1. 同步上报（Punch/LeaveRecord/DaySummary/MonthSummary 原子提交）
+2. 迁移申请（普通迁移）
+3. 迁移确认
+4. 强制接管（配对码+恢复码）
+5. 配对码查询（含首次生成）
+6. 配对码重置
+7. 恢复码首次生成
+8. 恢复码重置
+9. Web 只读绑定创建
+10. Web 只读绑定鉴权
+
+每个接口必须包含：
+- 请求/响应 JSON 示例
+- 错误码列表
+- 幂等字段（不适用标注 N/A）
+- 鉴权要求
+- 限流策略
+
+必须包含的附录/映射表：
+1. FR -> 接口覆盖映射表（FR-008/FR-016/FR-021/FR-022/FR-023/FR-026/FR-027/FR-028/FR-029/FR-031/FR-032/FR-033）
+2. 数据库拒绝原因 -> API 错误码映射表（含 REJECTED 与 NOOP 丢弃语义边界）
+3. 门控结果字段规范：gate_result(APPLIED/NOOP/REJECTED) + gate_reason 闭集枚举
+4. 门控返回矩阵：
+   - 相同 sync_id + 相同 payload_hash -> NOOP/REPLAY_NOOP
+   - 相同 sync_id + 不同 payload_hash -> REJECTED/SYNC_ID_CONFLICT
+   - 低/同版本 + 新 sync_id -> NOOP/LOW_OR_EQUAL_VERSION
+   - 写入生效 -> APPLIED/APPLIED_WRITE
+5. sync_commits.status 映射：APPLIED_WRITE 与 LOW_OR_EQUAL_VERSION 落库为 APPLIED
+6. payload_hash 生成口径（SHA-256、规范化JSON、字段白名单、未知字段拒绝）
+7. 时间精度：API 入库前按分钟向下取整
+8. 恢复码语义：重置后旧码失效、明文仅返回一次、校验不区分大小写
+9. 配对码语义：8位数字、未重置前持续有效
+
+验收时自行检查：
+- 10个接口全部覆盖
+- FR映射表完整
+- 错误码映射表完整
+- 门控矩阵完整
+- payload_hash 规范完整
+- 计算产出文件的 sha256 并输出","10个接口全部覆盖；FR映射表含12个FR；错误码映射表完整含REJECTED和NOOP边界；gate_result/gate_reason闭集枚举已定义；payload_hash规范完整；sha256已计算",P0,

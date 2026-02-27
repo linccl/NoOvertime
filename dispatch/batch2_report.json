@@ -1,0 +1,48 @@
+{
+  "success": true,
+  "dispatch_mode": "serial",
+  "workspace": "/Users/linshiyu/lincc/lincc-project/NoOvertime",
+  "requirements": [
+    "/Users/linshiyu/lincc/lincc-project/NoOvertime/docs/需求文档.md",
+    "/Users/linshiyu/lincc/lincc-project/NoOvertime/docs/数据库方案草案.md"
+  ],
+  "plans": [
+    "/Users/linshiyu/lincc/lincc-project/NoOvertime/docs/三项交付物执行计划.md",
+    "/Users/linshiyu/lincc/lincc-project/NoOvertime/docs/实施计划.md"
+  ],
+  "csv": "/Users/linshiyu/lincc/lincc-project/NoOvertime/dispatch/batch2_tasks.csv",
+  "decomposition": {
+    "used": false,
+    "success": true,
+    "attempts": 0,
+    "bridge_attempts": 0,
+    "session_id": "",
+    "task_count": 1,
+    "error": ""
+  },
+  "task_count": 1,
+  "task_order": [
+    "TASK-03"
+  ],
+  "question_rounds": 0,
+  "failed_tasks": [],
+  "results": [
+    {
+      "task_id": "TASK-03",
+      "title": "产出 docs/API契约草案.md",
+      "priority": "P0",
+      "depends_on": "",
+      "source": "csv",
+      "success": true,
+      "session_id": "019c4f99-fcbe-7de3-9987-bfb61f0aed84",
+      "bridge_attempts": 2,
+      "question_rounds": 0,
+      "acceptance_gate_passed": true,
+      "gate_fail_reasons": [],
+      "task_status": "DONE",
+      "error": "",
+      "agent_messages": "Task status:\nDONE\n\nImplementation summary:\n已按任务要求产出并完善 `docs/API契约草案.md`，覆盖 10 个必需接口，并补齐 9 项必需附录/映射（含 FR 映射、数据库拒绝原因映射、门控闭集与矩阵、`sync_commits.status` 映射、`payload_hash` 规范、时间精度、恢复码语义、配对码语义）。同时将 `db/migrations/001_init.sql` 的实际 `error_key` 全量映射到 API 错误码表。\n\nFiles changed:\n- `docs/API契约草案.md`（新增）\n\nValidation commands and results:\n- `rg -c '^### 2\\.[0-9]+ ' docs/API契约草案.md`  \n  结果：`endpoint_count=10`\n- `awk '/^## 附录 A/{...}' docs/API契约草案.md`  \n  结果：`fr_row_count=12`\n- `awk '/^## 附录 D/{...}' docs/API契约草案.md`  \n  结果：`gate_matrix_rows=4`\n- `rg -q 'SHA-256|字段白名单|未知字段拒绝' docs/API契约草案.md`  \n  结果：关键项均命中（通过）\n- `rg -o '\\[error_key=[A-Z0-9_]+' db/migrations/001_init.sql` 与 `rg -o 'P0001 \\+ [A-Z0-9_]+' docs/API契约草案.md` 对比  \n  结果：`migration_error_key_count=18`，`api_mapped_error_key_count=18`，`unmapped_error_keys=`（空）\n- `shasum -a 256 docs/API契约草案.md | awk '{print $1}'`  \n  结果：`83f14329dfd0bff2f7e4e8e1df0ed7a359502b84303dab631ebc7b327a7274a0`\n\nAcceptance checklist:\n- PASS: 10个接口全部覆盖\n- PASS: FR映射表包含 12 个 FR（FR-008/016/021/022/023/026/027/028/029/031/032/033）\n- PASS: 错误码映射表完整，且包含 REJECTED 与 NOOP 语义边界\n- PASS: `gate_result/gate_reason` 闭集枚举已定义\n- PASS: 门控返回矩阵完整（4 条固定场景）\n- PASS: `payload_hash` 规范完整（SHA-256、规范化 JSON、字段白名单、未知字段拒绝）\n- PASS: `sync_commits.status` 映射已定义（`APPLIED_WRITE` 与 `LOW_OR_EQUAL_VERSION` 落库 `APPLIED`）\n- PASS: 时间精度规则已定义（入库前分钟截断）\n- PASS: 恢复码语义已定义（重置失效、明文一次、大小写不敏感）\n- PASS: 配对码语义已定义（8位数字、未重置前持续有效）\n- PASS: 产出文件 sha256 已计算并输出\n\nRemaining risks:\n- 当前验收为契约文档层验证；服务实现与联调尚未执行，HTTP 状态码与运行时行为仍需后续实现阶段按契约逐项对齐验证。\n\nQuestions:\n- 无"
+    }
+  ],
+  "stop_reason": ""
+}

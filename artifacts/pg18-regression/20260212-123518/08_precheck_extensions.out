@@ -1,0 +1,13 @@
+ extname | extnamespace 
+---------+--------------
+ plpgsql | pg_catalog
+(1 row)
+
+BEGIN
+CREATE EXTENSION
+ROLLBACK
+ extname | extnamespace 
+---------+--------------
+ plpgsql | pg_catalog
+(1 row)
+

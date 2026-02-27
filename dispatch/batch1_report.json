@@ -1,0 +1,53 @@
+{
+  "success": false,
+  "dispatch_mode": "serial",
+  "workspace": "/Users/linshiyu/lincc/lincc-project/NoOvertime",
+  "requirements": [
+    "/Users/linshiyu/lincc/lincc-project/NoOvertime/docs/需求文档.md",
+    "/Users/linshiyu/lincc/lincc-project/NoOvertime/docs/数据库方案草案.md"
+  ],
+  "plans": [
+    "/Users/linshiyu/lincc/lincc-project/NoOvertime/docs/三项交付物执行计划.md",
+    "/Users/linshiyu/lincc/lincc-project/NoOvertime/docs/实施计划.md"
+  ],
+  "csv": "/Users/linshiyu/lincc/lincc-project/NoOvertime/dispatch/batch1_tasks.csv",
+  "decomposition": {
+    "used": false,
+    "success": true,
+    "attempts": 0,
+    "bridge_attempts": 0,
+    "session_id": "",
+    "task_count": 2,
+    "error": ""
+  },
+  "task_count": 2,
+  "task_order": [
+    "TASK-01",
+    "TASK-02"
+  ],
+  "question_rounds": 0,
+  "failed_tasks": [
+    "TASK-01"
+  ],
+  "results": [
+    {
+      "task_id": "TASK-01",
+      "title": "冻结版本快照初始化与上游基线校验",
+      "priority": "P0",
+      "depends_on": "",
+      "source": "csv",
+      "success": false,
+      "session_id": "019c4f8c-3cdd-73b1-8ba6-9291d614eaa6",
+      "bridge_attempts": 4,
+      "question_rounds": 0,
+      "acceptance_gate_passed": false,
+      "gate_fail_reasons": [
+        "Validation section must include commands and results"
+      ],
+      "task_status": "DONE",
+      "error": "Acceptance gate unresolved after repair rounds",
+      "agent_messages": "Task status:\nDONE\n\nImplementation summary:\n- 已完成 `docs/沟通进展日志.md` 的步骤 0 留痕更新：第 1 章规则判定基线更新为 `Frozen v1.64`，并补齐 `latest_snapshot_id`。\n- 已追加两条记录：`记录 190（版本同步记录）`、`记录 191（上游基线快照初始化记录）`。\n- 已写入版本升级原因、`latest_snapshot_id` 切换、连续零问题计数重置 `0/3`、三份上游基线 `baseline_sha256`，并满足“动作完成时间 + 记录时间”。\n\nFiles changed:\n- `docs/沟通进展日志.md:10`\n- `docs/沟通进展日志.md:11`\n- `docs/沟通进展日志.md:12`\n- `docs/沟通进展日志.md:42`\n- `docs/沟通进展日志.md:50`\n- `docs/沟通进展日志.md:51`\n- `docs/沟通进展日志.md:56`\n- `docs/沟通进展日志.md:86`\n- `docs/沟通进展日志.md:87`\n- `docs/沟通进展日志.md:94`\n- `docs/沟通进展日志.md:112`\n- `docs/沟通进展日志.md:113`\n- `docs/沟通进展日志.md:115`\n- `docs/沟通进展日志.md:117`\n- `docs/沟通进展日志.md:130`\n\nValidation commands and results:\n1. Command: `for f in docs/需求文档.md docs/数据库方案草案.md docs/实施计划.md docs/三项交付物执行计划.md; do printf \"%s \" \"$f\"; shasum -a 256 \"$f\" | awk '{print $1}'; done`  \n   Result:  \n   - `docs/需求文档.md e05bf171c4cb7a668f609b7e8ed27b0c636c25ccc05d0c6ed34bcf4c8adf6512`  \n   - `docs/数据库方案草案.md 5c396d2423f847019c8820f35772c1fc0e372f6809a3b0302f8456cb78070384`  \n   - `docs/实施计划.md 5b6adf97fb722af25041264d34ea1f444980714fc65aae8d8d20f399c57e0582`  \n   - `docs/三项交付物执行计划.md b6b4f03c9bd4670283767de3fb350d759872189d337e32085842c03fe3ed994e`\n\n2. Command: `rg -n \"截至时间|当前规则判定基线|latest_snapshot_id|连续零问题计数|Frozen v1.64\" docs/沟通进展日志.md`  \n   Result:  \n   - `10:- 截至时间：2026-02-12 09:53:21 +08:00`  \n   - `11:- ... 当前规则判定基线 ... Frozen v1.64 ... 连续零问题计数 0/3`  \n   - `12:- latest_snapshot_id：frozen_version=Frozen v1.64 + snapshot_record_time=2026-02-12 09:53:20 +08:00`  \n   - `50:- 记录 190（Frozen v1.64）... 连续零问题计数 ... 重置为 0/3`  \n   - `51:- 记录 191（Frozen v1.64）... baseline_sha256 留痕`\n\n3. Command: `rg -n \"动作完成时间：[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} \\\\+08:00|记录时间：[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} \\\\+08:00\" docs/沟通进展日志.md`  \n   Result:  \n   - `119:- 动作完成时间：2026-02-12 09:53:18 +08:00`  \n   - `120:- 记录时间：2026-02-12 09:53:19 +08:00`  \n   - `132:- 动作完成时间：2026-02-12 09:53:20 +08:00`  \n   - `133:- 记录时间：2026-02-12 09:53:21 +08:00`\n\nAcceptance checklist:\n- PASS: `sha256` 可复核且与文件实际一致。\n- PASS: 版本号已更新到 `Frozen v1.64`。\n- PASS: 第 1 章 `latest_snapshot_id` 已对齐 `Frozen v1.64`。\n- PASS: 连续零问题计数已重置为 `0/3`。\n- PASS: 新增记录均包含“动作完成时间 + 记录时间”。\n\nRemaining risks:\n- 若后续三份上游文档发生变更，当前快照需重新计算并追加刷新记录。\n\nQuestions:\n- 无"
+    }
+  ],
+  "stop_reason": "acceptance_gate_failed:TASK-01"
+}

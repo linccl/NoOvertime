@@ -1,0 +1,89 @@
+SET
+SET
+psql:/Users/linshiyu/lincc/lincc-project/NoOvertime/db/validation/db_live_cases.sql:5: NOTICE:  table "tmp_case_results" does not exist, skipping
+DROP TABLE
+CREATE TABLE
+psql:/Users/linshiyu/lincc/lincc-project/NoOvertime/db/validation/db_live_cases.sql:16: NOTICE:  table "tmp_side_effect_matrix" does not exist, skipping
+DROP TABLE
+CREATE TABLE
+CREATE FUNCTION
+CREATE FUNCTION
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+DO
+ case_id | pass |                                                                                       actual_result                                                                                       | sqlstate |           error_key            |               constraint_name               |                          note                          
+---------+------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+----------+--------------------------------+---------------------------------------------+--------------------------------------------------------
+ DB-C01  | t    | counts punch=2, leave=1, day=1, month=1, sync=1                                                                                                                                           | -        | -                              | -                                           | atomic write across 5 object groups success
+ DB-C02  | t    | final status=COMPLETED                                                                                                                                                                    | -        | -                              | -                                           | -
+ DB-C03  | t    | final status=COMPLETED                                                                                                                                                                    | -        | -                              | -                                           | -
+ DB-C04  | t    | writer_device_id=00000000-0000-0000-0000-000000000102, writer_epoch=2, old_device_status=REVOKED                                                                                          | -        | -                              | -                                           | -
+ DB-C05  | t    | [error_key=MIGRATION_TRANSITION_INVALID] invalid migration transition: PENDING -> COMPLETED                                                                                               | P0001    | MIGRATION_TRANSITION_INVALID   | -                                           | -
+ DB-C06  | t    | [error_key=MIGRATION_SOURCE_MISMATCH] invalid normal migration source: from_device_id 00000000-0000-0000-0000-000000000103 must match current writer 00000000-0000-0000-0000-000000000101 | P0001    | MIGRATION_SOURCE_MISMATCH      | -                                           | -
+ DB-C07  | t    | [error_key=MIGRATION_IMMUTABLE_FIELDS] migration request immutable fields cannot be changed                                                                                               | P0001    | MIGRATION_IMMUTABLE_FIELDS     | -                                           | -
+ DB-C08  | t    | [error_key=MIGRATION_IMMUTABLE_FIELDS] migration request immutable fields cannot be changed                                                                                               | P0001    | MIGRATION_IMMUTABLE_FIELDS     | -                                           | -
+ DB-C09  | f    | unexpected success                                                                                                                                                                        | -        | -                              | -                                           | -
+ DB-C10  | f    | duplicate key value violates unique constraint "uk_migration_user_pending"                                                                                                                | 23505    | -                              | -                                           | old_status=PENDING
+ DB-C11  | t    | pairing_code_version=2, revoked_bindings=2                                                                                                                                                | -        | -                              | -                                           | -
+ DB-C12  | t    | [error_key=WEB_BINDING_REACTIVATE_DENIED] revoked web binding cannot be re-activated                                                                                                      | P0001    | WEB_BINDING_REACTIVATE_DENIED  | -                                           | -
+ DB-C13  | t    | delta punch=0, leave=0, day=0, month=0, sync=0                                                                                                                                            | -        | -                              | -                                           | replay validated via ON CONFLICT DO NOTHING
+ DB-C14  | t    | duplicate key value violates unique constraint "uq_sync_commits_user_sync"                                                                                                                | 23505    | -                              | uq_sync_commits_user_sync                   | delta punch=0, leave=0, day=0, month=0, sync=0
+ DB-C15  | t    | delta punch=0, leave=0, day=0, month=0, sync=1                                                                                                                                            | -        | -                              | -                                           | current DB behavior: only sync_commits row is inserted
+ DB-C16  | t    | version 1 -> 2, sync_rows=1                                                                                                                                                               | -        | -                              | -                                           | -
+ DB-C17  | t    | [error_key=SYNC_COMMIT_STALE_WRITER] stale or non-writer device commit: device 00000000-0000-0000-0000-000000000102, epoch 1                                                              | P0001    | SYNC_COMMIT_STALE_WRITER       | -                                           | -
+ DB-C18  | t    | [error_key=PUNCH_END_REQUIRES_START] invalid punch pair: END requires START (local_date=2026-02-16)                                                                                       | P0001    | PUNCH_END_REQUIRES_START       | -                                           | -
+ DB-C19  | f    | [error_key=FULL_DAY_LEAVE_WITH_AUTO_PUNCH] invalid FULL_DAY leave: AUTO punch already exists on this date                                                                                 | P0001    | FULL_DAY_LEAVE_WITH_AUTO_PUNCH | -                                           | -
+ DB-C20  | f    | [error_key=AUTO_PUNCH_ON_FULL_DAY_LEAVE] invalid auto punch: FULL_DAY leave day cannot accept AUTO punch                                                                                  | P0001    | AUTO_PUNCH_ON_FULL_DAY_LEAVE   | -                                           | -
+ DB-C21  | t    | new row for relation "punch_records" violates check constraint "ck_punch_records_at_utc_minute_precision"                                                                                 | 23514    | -                              | ck_punch_records_at_utc_minute_precision    | -
+ DB-C22  | t    | new row for relation "punch_records" violates check constraint "ck_punch_records_minute_of_day_match_at_utc"                                                                              | 23514    | -                              | ck_punch_records_minute_of_day_match_at_utc | -
+ DB-C23  | t    | [error_key=RECORD_USER_ID_IMMUTABLE] punch_records user_id is immutable                                                                                                                   | P0001    | RECORD_USER_ID_IMMUTABLE       | -                                           | -
+ DB-C24  | t    | [error_key=RECORD_USER_ID_IMMUTABLE] leave_records user_id is immutable                                                                                                                   | P0001    | RECORD_USER_ID_IMMUTABLE       | -                                           | -
+ DB-C25  | t    | blocked_rows=3                                                                                                                                                                            | -        | -                              | -                                           | blocked hit found across 3 dimensions
+ DB-C26  | t    | active_blocked_rows=0                                                                                                                                                                     | -        | -                              | -                                           | unblocked after window expiration
+ DB-C27  | t    | input=2000-01-01 00:00:00+00, normalized=2026-02-12 04:30:00+00                                                                                                                           | -        | -                              | -                                           | window_start normalized by UTC override
+ DB-C28  | t    | new row for relation "users" violates check constraint "ck_users_pairing_code_format"                                                                                                     | 23514    | -                              | ck_users_pairing_code_format                | -
+(28 rows)
+
+ case_id |   table_name    | insert_delta | update_delta | delete_delta 
+---------+-----------------+--------------+--------------+--------------
+ DB-C13  | day_summaries   |            0 |            0 |            0
+ DB-C13  | leave_records   |            0 |            0 |            0
+ DB-C13  | month_summaries |            0 |            0 |            0
+ DB-C13  | punch_records   |            0 |            0 |            0
+ DB-C13  | sync_commits    |            0 |            0 |            0
+ DB-C14  | day_summaries   |            0 |            0 |            0
+ DB-C14  | leave_records   |            0 |            0 |            0
+ DB-C14  | month_summaries |            0 |            0 |            0
+ DB-C14  | punch_records   |            0 |            0 |            0
+ DB-C14  | sync_commits    |            0 |            0 |            0
+ DB-C15  | day_summaries   |            0 |            0 |            0
+ DB-C15  | leave_records   |            0 |            0 |            0
+ DB-C15  | month_summaries |            0 |            0 |            0
+ DB-C15  | punch_records   |            0 |            0 |            0
+ DB-C15  | sync_commits    |            1 |            0 |            0
+(15 rows)
+

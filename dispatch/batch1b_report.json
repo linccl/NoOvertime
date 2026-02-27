@@ -1,0 +1,48 @@
+{
+  "success": true,
+  "dispatch_mode": "serial",
+  "workspace": "/Users/linshiyu/lincc/lincc-project/NoOvertime",
+  "requirements": [
+    "/Users/linshiyu/lincc/lincc-project/NoOvertime/docs/需求文档.md",
+    "/Users/linshiyu/lincc/lincc-project/NoOvertime/docs/数据库方案草案.md"
+  ],
+  "plans": [
+    "/Users/linshiyu/lincc/lincc-project/NoOvertime/docs/三项交付物执行计划.md",
+    "/Users/linshiyu/lincc/lincc-project/NoOvertime/docs/实施计划.md"
+  ],
+  "csv": "/Users/linshiyu/lincc/lincc-project/NoOvertime/dispatch/batch1b_tasks.csv",
+  "decomposition": {
+    "used": false,
+    "success": true,
+    "attempts": 0,
+    "bridge_attempts": 0,
+    "session_id": "",
+    "task_count": 1,
+    "error": ""
+  },
+  "task_count": 1,
+  "task_order": [
+    "TASK-02"
+  ],
+  "question_rounds": 0,
+  "failed_tasks": [],
+  "results": [
+    {
+      "task_id": "TASK-02",
+      "title": "产出 db/migrations/001_init.sql",
+      "priority": "P0",
+      "depends_on": "",
+      "source": "csv",
+      "success": true,
+      "session_id": "019c4f92-0b2b-7ac3-b0d3-d9c8d10103eb",
+      "bridge_attempts": 2,
+      "question_rounds": 0,
+      "acceptance_gate_passed": true,
+      "gate_fail_reasons": [],
+      "task_status": "DONE",
+      "error": "",
+      "agent_messages": "Task status:\nDONE\n\nImplementation summary:\n- 已新增 `db/migrations/001_init.sql`，并按要求落地：`extension -> enum -> table -> index -> function -> trigger`。\n- 已覆盖 Draft v0.7 要求的全部对象：`pgcrypto`、8 个枚举、10 张表、全部索引（含指定部分唯一索引）、`fk_users_writer_device`（`DEFERRABLE INITIALLY DEFERRED`）、10 个函数、10 个触发器。\n- 所有触发器/函数中的业务拒绝均使用 `RAISE EXCEPTION USING ERRCODE='P0001', MESSAGE='[error_key=...] ...'` 格式。\n\nFiles changed:\n- `db/migrations/001_init.sql`（新增）\n- `db/migrations/`（新增目录）\n\nValidation commands and results:\n- `wc -l db/migrations/001_init.sql`  \n  - 结果：`736`（文件已生成）\n- 计数校验（`rg/awk`）  \n  - 结果：`extension=1, enum=8, table=10, index=15, function=10, trigger=10`\n- 事务与执行参数校验（`rg`）  \n  - 结果：`BEGIN_count=1, COMMIT_count=1, ON_ERROR_STOP_count=1`\n- 顺序校验（`awk`）  \n  - 结果：`ORDER_CHECK=PASS`\n- `RAISE` 规范校验（`awk`）  \n  - 结果：`RAISE_FORMAT_CHECK=PASS`\n- 基线 `error_key` 校验（循环 `rg`）  \n  - 结果：基线 key 全部 `PASS`\n- 种子数据校验（`rg`）  \n  - 结果：`insert_statement_count=0, copy_statement_count=0`\n- 哈希校验（`shasum -a 256 db/migrations/001_init.sql | awk '{print $1}'`）  \n  - 结果：`abbc72a46d343100de590f29f012e3ef0a50dfefb3f9f74b048d8133afe3e230`\n\nAcceptance checklist:\n- PASS: `001_init.sql` 已产出且为空库初始化脚本（无测试种子数据）。\n- PASS: `BEGIN...COMMIT` 包裹完整（各 1 次）。\n- PASS: 对象顺序正确（`extension -> enum -> table -> index -> function -> trigger`）。\n- PASS: 所有 `RAISE EXCEPTION` 使用 `[error_key=XXX]` 前缀且 `ERRCODE='P0001'`。\n- PASS: 对象覆盖与数量与 `docs/数据库方案草案.md`（Draft v0.7）一致。\n- PASS: `sha256` 已计算并输出。\n\nRemaining risks:\n- 当前环境无 `psql/postgres` 可执行文件，未进行真实 PostgreSQL 实例执行；“SQL 语法正确性”基于静态规则与结构检查验真。\n\nQuestions:\n- 无"
+    }
+  ],
+  "stop_reason": ""
+}

@@ -1,0 +1,55 @@
+name: regression-gate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ${{ secrets.PG_REGRESSION_PASSWORD }}
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: ${{ secrets.PG_REGRESSION_PASSWORD }}
+      REGRESSION_DB_HOST: 127.0.0.1
+      REGRESSION_DB_PORT: "5432"
+      REGRESSION_DB_USER: postgres
+      REGRESSION_DB_ADMIN_DB: postgres
+      REGRESSION_DB_SSLMODE: disable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client netcat-openbsd
+
+      - name: Check regression secret
+        run: |
+          if [ -z "${PGPASSWORD}" ]; then
+            echo "Missing required secret: PG_REGRESSION_PASSWORD"
+            exit 1
+          fi
+
+      - name: Run unified gate
+        run: make gate

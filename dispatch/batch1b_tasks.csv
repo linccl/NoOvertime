@@ -1,0 +1,30 @@
+task_id,title,description,acceptance_criteria,priority,depends_on
+TASK-02,产出 db/migrations/001_init.sql,"全程留痕。执行 docs/三项交付物执行计划.md 步骤1：产出初始化迁移脚本 001_init.sql。
+
+你必须严格按照 docs/数据库方案草案.md（Draft v0.7）落地全部数据库对象。
+
+具体要求：
+1. 创建 db/migrations/ 目录及 001_init.sql
+2. 脚本必须在单事务内执行（BEGIN ... COMMIT），并要求执行端启用 ON_ERROR_STOP
+3. 执行顺序固定：extension -> enum -> table -> index -> function -> trigger
+4. 覆盖全部对象：
+   a. CREATE EXTENSION IF NOT EXISTS pgcrypto
+   b. 8个枚举类型：punch_type, punch_source, leave_type, device_status, migration_mode, migration_status, summary_status, security_scene
+   c. 10张表：users, devices, punch_records, leave_records, day_summaries, month_summaries, migration_requests, security_attempt_windows, sync_commits, web_read_bindings（含所有 CHECK/UNIQUE/FK 约束）
+   d. 所有索引（含部分唯一索引 uk_punch_active_unique, uk_leave_active_unique, uk_migration_user_pending 等）
+   e. ALTER TABLE users ADD CONSTRAINT fk_users_writer_device（DEFERRABLE INITIALLY DEFERRED）
+   f. 所有触发器函数：validate_punch_pair, revoke_web_bindings_on_pairing_change, rotate_pairing_code, enforce_migration_status_transition, validate_web_binding_version, validate_sync_commit_writer, normalize_security_window_start, validate_auto_punch_not_on_full_day_leave, validate_full_day_leave_without_auto_punch, validate_record_user_id_immutable
+   g. 所有触发器（含 CONSTRAINT TRIGGER 和普通 TRIGGER）
+5. 所有约束/索引/函数/触发器必须显式命名
+6. 触发器/函数的 RAISE EXCEPTION 必须使用 error_key 前缀格式：
+   RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = '[error_key=<KEY>] ...'
+   error_key 基线：PUNCH_END_REQUIRES_START, PUNCH_END_NOT_AFTER_START, MIGRATION_SOURCE_MISMATCH, MIGRATION_IMMUTABLE_FIELDS, MIGRATION_TRANSITION_INVALID, WEB_BINDING_REACTIVATE_DENIED, SYNC_COMMIT_STALE_WRITER, AUTO_PUNCH_ON_FULL_DAY_LEAVE, FULL_DAY_LEAVE_WITH_AUTO_PUNCH, RECORD_USER_ID_IMMUTABLE 等
+7. 脚本定位为空库初始化一次性脚本，不内置测试种子数据
+
+验收时自行检查：
+- SQL 语法正确性
+- BEGIN...COMMIT 包裹完整
+- 对象顺序正确（无前向引用）
+- 所有 RAISE 使用 [error_key=XXX] 前缀
+- 对象数量与数据库方案草案一致
+- 计算产出文件的 sha256 并输出","001_init.sql 语法正确；BEGIN...COMMIT 包裹；对象顺序无前向引用；所有 RAISE 使用 [error_key=XXX] 前缀；对象覆盖数据库方案草案全部定义；sha256 已计算",P0,
