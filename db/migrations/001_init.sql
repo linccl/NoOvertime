@@ -373,14 +373,15 @@ CREATE OR REPLACE FUNCTION enforce_migration_status_transition()
 RETURNS TRIGGER AS $$
 DECLARE
   v_writer_device_id UUID;
+  v_now TIMESTAMPTZ := clock_timestamp();
 BEGIN
   IF TG_OP = 'INSERT' THEN
     UPDATE migration_requests
        SET status = 'EXPIRED',
-           updated_at = now()
+           updated_at = v_now
      WHERE user_id = NEW.user_id
        AND status = 'PENDING'
-       AND expires_at <= now();
+       AND expires_at <= v_now;
 
     SELECT writer_device_id
       INTO v_writer_device_id
@@ -413,7 +414,7 @@ BEGIN
         );
     END IF;
 
-    IF NEW.expires_at <= now() THEN
+    IF NEW.expires_at <= v_now THEN
       RAISE EXCEPTION USING
         ERRCODE = 'P0001',
         MESSAGE = format(
@@ -435,7 +436,7 @@ BEGIN
       MESSAGE = '[error_key=MIGRATION_IMMUTABLE_FIELDS] migration request immutable fields cannot be changed';
   END IF;
 
-  IF now() > NEW.expires_at AND NEW.status IN ('CONFIRMED', 'COMPLETED') THEN
+  IF v_now > NEW.expires_at AND NEW.status IN ('CONFIRMED', 'COMPLETED') THEN
     RAISE EXCEPTION USING
       ERRCODE = 'P0001',
       MESSAGE = format(
@@ -710,14 +711,14 @@ EXECUTE FUNCTION normalize_security_window_start();
 CREATE CONSTRAINT TRIGGER trg_validate_auto_punch_not_on_full_day_leave
 AFTER INSERT OR UPDATE OF source, local_date, deleted_at, user_id
 ON punch_records
-DEFERRABLE INITIALLY DEFERRED
+DEFERRABLE INITIALLY IMMEDIATE
 FOR EACH ROW
 EXECUTE FUNCTION validate_auto_punch_not_on_full_day_leave();
 
 CREATE CONSTRAINT TRIGGER trg_validate_full_day_leave_without_auto_punch
 AFTER INSERT OR UPDATE OF leave_type, local_date, deleted_at, user_id
 ON leave_records
-DEFERRABLE INITIALLY DEFERRED
+DEFERRABLE INITIALLY IMMEDIATE
 FOR EACH ROW
 EXECUTE FUNCTION validate_full_day_leave_without_auto_punch();
 

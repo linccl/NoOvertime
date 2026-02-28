@@ -54,8 +54,8 @@ type Server struct {
 	httpServer        *http.Server
 	mux               *http.ServeMux
 	db                HealthChecker
-	syncGate          *syncCommitGate
 	migrationRateGate *migrationRateGate
+	now               func() time.Time
 }
 
 // NewServer builds an API server with the required dependencies.
@@ -64,8 +64,8 @@ func NewServer(addr string, db HealthChecker) *Server {
 	s := &Server{
 		mux:               mux,
 		db:                db,
-		syncGate:          newSyncCommitGate(),
 		migrationRateGate: newMigrationRateGate(),
+		now:               time.Now,
 	}
 
 	s.handle("/health", s.healthHandler)
