@@ -1,6 +1,6 @@
 # API 使用说明
 
-本文档用于本地联调与调用示例，当前已实现路由如下（以 `internal/api/server.go` 注册为准；其中 `/health` 与 `/sync/commits` 提供详细示例，其余接口语义见 `docs/API契约草案.md`）：
+本文档用于本地联调与调用示例，当前已实现路由如下（以 `internal/api/server.go` 注册为准；其中 `/health` 与 `/api/v1/sync/commits` 提供详细示例，其余接口语义见 `docs/API契约草案.md`）：
 
 - `GET /health`
 - `POST /api/v1/sync/commits`
