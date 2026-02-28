@@ -34,7 +34,7 @@
 | swarm-msg.sh send <role> "msg" | 发消息给指定角色 |
 | swarm-msg.sh reply <id> "msg" | 回复消息 |
 | swarm-msg.sh read | 查看收件箱 |
-| swarm-msg.sh wait --timeout 60 | 等待新消息 |
+| swarm-msg.sh wait --timeout 6000 | 等待新消息 |
 | swarm-msg.sh list-roles | 查看在线角色 |
 | swarm-msg.sh broadcast "msg" | 广播给所有人 |
 
