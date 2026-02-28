@@ -1,0 +1,6 @@
+BEGIN
+psql:/Users/linshiyu/lincc/lincc-project/NoOvertime/.swarm-worktrees/frontend/db/migrations/001_init.sql:8: NOTICE:  42710: extension "pgcrypto" already exists, skipping
+LOCATION:  CreateExtension, extension.c:1988
+CREATE EXTENSION
+psql:/Users/linshiyu/lincc/lincc-project/NoOvertime/.swarm-worktrees/frontend/db/migrations/001_init.sql:11: ERROR:  42710: type "punch_type" already exists
+LOCATION:  DefineEnum, typecmds.c:1211

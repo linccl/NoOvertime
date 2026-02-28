@@ -1,0 +1,9 @@
+[2026-03-01 02:15:03 +0800] Step 1/8: connectivity and client probe
+[2026-03-01 02:15:03 +0800] Step 2/8: create fresh databases
+[2026-03-01 02:15:07 +0800] Step 3/8: precheck and PG18 gate
+[2026-03-01 02:15:10 +0800] Step 4/8: first migration run
+[2026-03-01 02:15:17 +0800] Step 5/8: second migration run expected failure
+[2026-03-01 02:15:18 +0800] Step 6/8: rollback drill expected failure + clean check
+[2026-03-01 02:15:24 +0800] Step 7/8: object count check
+[2026-03-01 02:15:25 +0800] Step 8/8: DB case suite + supplemental C09/C10
+[2026-03-01 02:15:40 +0800] Completed. Summary: /Users/linshiyu/lincc/lincc-project/NoOvertime/.swarm-worktrees/frontend/artifacts/pg18-regression/20260301-021503/99_summary.md

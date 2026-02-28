@@ -1,0 +1,15 @@
+ server_version_num 
+--------------------
+ 180001
+(1 row)
+
+ server_version 
+----------------
+ 18.1
+(1 row)
+
+ TimeZone 
+----------
+ UTC
+(1 row)
+
