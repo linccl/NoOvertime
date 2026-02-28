@@ -1,9 +1,18 @@
 # NoOvertime Backend
 
-NoOvertime 后端服务（Go + PostgreSQL），当前提供以下核心接口：
+NoOvertime 后端服务（Go + PostgreSQL），当前已注册路由（以 `internal/api/server.go` 为准）：
 
 - `GET /health`
 - `POST /api/v1/sync/commits`
+- `POST /api/v1/migrations/requests`
+- `POST /api/v1/migrations/{migration_request_id}/confirm`
+- `POST /api/v1/migrations/forced-takeover`
+- `POST /api/v1/pairing-code/query`
+- `POST /api/v1/pairing-code/reset`
+- `POST /api/v1/recovery-code/generate`
+- `POST /api/v1/recovery-code/reset`
+- `POST /api/v1/web/read-bindings`
+- `POST /api/v1/web/read-bindings/auth`
 
 ## 本地运行
 
