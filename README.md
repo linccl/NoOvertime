@@ -4,6 +4,15 @@ NoOvertime 后端服务（Go + PostgreSQL），当前提供以下核心接口：
 
 - `GET /health`
 - `POST /api/v1/sync/commits`
+- `POST /api/v1/migrations/requests`
+- `POST /api/v1/migrations/{migration_request_id}/confirm`
+- `POST /api/v1/migrations/forced-takeover`
+- `POST /api/v1/pairing-code/query`
+- `POST /api/v1/pairing-code/reset`
+- `POST /api/v1/recovery-code/generate`
+- `POST /api/v1/recovery-code/reset`
+- `POST /api/v1/web/read-bindings`
+- `POST /api/v1/web/read-bindings/auth`
 
 ## 本地运行
 
@@ -24,7 +33,7 @@ psql -d no_overtime -f db/migrations/001_init.sql
 最小必需配置：
 
 ```bash
-export DATABASE_DSN='postgres://postgres:postgres@localhost:5432/no_overtime?sslmode=disable'
+export DATABASE_DSN='postgres://<user>:<password>@localhost:5432/no_overtime?sslmode=disable'
 ```
 
 常用配置（含默认值）：
