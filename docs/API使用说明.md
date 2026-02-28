@@ -1,9 +1,18 @@
 # API 使用说明
 
-本文档用于本地联调与调用示例，当前覆盖：
+本文档用于本地联调与调用示例，当前已实现路由如下（以 `internal/api/server.go` 注册为准；其中 `/health` 与 `/sync/commits` 提供详细示例，其余接口语义见 `docs/API契约草案.md`）：
 
 - `GET /health`
 - `POST /api/v1/sync/commits`
+- `POST /api/v1/migrations/requests`
+- `POST /api/v1/migrations/{migration_request_id}/confirm`
+- `POST /api/v1/migrations/forced-takeover`
+- `POST /api/v1/pairing-code/query`
+- `POST /api/v1/pairing-code/reset`
+- `POST /api/v1/recovery-code/generate`
+- `POST /api/v1/recovery-code/reset`
+- `POST /api/v1/web/read-bindings`
+- `POST /api/v1/web/read-bindings/auth`
 
 ## 1. 通用约定
 
