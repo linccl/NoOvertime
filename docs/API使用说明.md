@@ -13,6 +13,8 @@
 - `POST /api/v1/recovery-code/reset`
 - `POST /api/v1/web/read-bindings`
 - `POST /api/v1/web/read-bindings/auth`
+- `POST /api/v1/web/month-summaries/query`
+- `POST /api/v1/web/day-summaries/query`
 
 ## 1. 通用约定
 
