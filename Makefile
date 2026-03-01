@@ -2,6 +2,13 @@ SHELL := /usr/bin/env bash
 
 .PHONY: regression test check gate fmt-check vet unit-test
 
+# Work around dyld abort on recent macOS where Go's default internal linker may
+# produce *.test binaries missing LC_UUID; external link mode fixes it.
+UNIT_TEST_FLAGS :=
+ifeq ($(shell uname -s),Darwin)
+UNIT_TEST_FLAGS += -ldflags=-linkmode=external
+endif
+
 regression:
 	./scripts/run_regression_gate.sh $(REGRESSION_GATE_ARGS)
 
@@ -26,6 +33,6 @@ vet:
 	go vet ./...
 
 unit-test:
-	go test ./...
+	go test $(UNIT_TEST_FLAGS) ./...
 
 gate: fmt-check vet unit-test check
