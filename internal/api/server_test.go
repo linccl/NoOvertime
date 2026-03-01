@@ -378,6 +378,8 @@ func TestBatch2RoutesRejectNonPostWithUnifiedError(t *testing.T) {
 		{name: "recovery_reset", path: recoveryCodeResetPath},
 		{name: "web_read_bindings", path: webReadBindingsPath},
 		{name: "web_read_bindings_auth", path: webReadBindingsAuthPath},
+		{name: "web_month_summaries_query", path: webMonthSummariesQueryPath},
+		{name: "web_day_summaries_query", path: webDaySummariesQueryPath},
 	}
 
 	for _, tc := range tests {
@@ -424,6 +426,8 @@ func TestBatch2RoutesRegisteredAndUseUnifiedWriteError(t *testing.T) {
 		{name: "recovery_reset", path: recoveryCodeResetPath, wantStatus: http.StatusBadRequest, wantCode: invalidArgumentCode},
 		{name: "web_read_bindings", path: webReadBindingsPath, wantStatus: http.StatusBadRequest, wantCode: invalidArgumentCode},
 		{name: "web_read_bindings_auth", path: webReadBindingsAuthPath, wantStatus: http.StatusBadRequest, wantCode: invalidArgumentCode},
+		{name: "web_month_summaries_query", path: webMonthSummariesQueryPath, wantStatus: http.StatusBadRequest, wantCode: invalidArgumentCode},
+		{name: "web_day_summaries_query", path: webDaySummariesQueryPath, wantStatus: http.StatusBadRequest, wantCode: invalidArgumentCode},
 	}
 
 	for _, tc := range tests {
