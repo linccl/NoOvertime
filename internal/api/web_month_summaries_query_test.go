@@ -10,8 +10,6 @@ import (
 	"testing"
 	"time"
 
-	apperrors "noovertime/internal/errors"
-
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -370,17 +368,3 @@ func (f *fakeWebMonthSummariesQueryTx) QueryRow(_ context.Context, query string,
 }
 
 func (f *fakeWebMonthSummariesQueryTx) Conn() *pgx.Conn { return nil }
-
-func assertAPIError(t *testing.T, err error, wantStatus int, wantCode string) {
-	t.Helper()
-	var apiErr apperrors.APIError
-	if !errors.As(err, &apiErr) {
-		t.Fatalf("expected APIError, got %T", err)
-	}
-	if apiErr.StatusCode() != wantStatus {
-		t.Fatalf("status = %d", apiErr.StatusCode())
-	}
-	if apiErr.Code != wantCode {
-		t.Fatalf("code = %q", apiErr.Code)
-	}
-}
