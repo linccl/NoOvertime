@@ -291,12 +291,12 @@ type fakeWebDaySummariesQueryDB struct {
 	loadErr        error
 	queryErr       error
 
-	withTxCalls          int
-	lastLookupHash       string
-	lastDayQueryArgsLen  int
-	lastDayQueryUserID   string
-	lastDayQueryStart    string
-	lastDayQueryEnd      string
+	withTxCalls         int
+	lastLookupHash      string
+	lastDayQueryArgsLen int
+	lastDayQueryUserID  string
+	lastDayQueryStart   string
+	lastDayQueryEnd     string
 }
 
 func (f *fakeWebDaySummariesQueryDB) Health(context.Context) error {
@@ -387,4 +387,3 @@ func (f *fakeWebDaySummariesQueryTx) QueryRow(_ context.Context, query string, a
 }
 
 func (f *fakeWebDaySummariesQueryTx) Conn() *pgx.Conn { return nil }
-

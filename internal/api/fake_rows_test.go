@@ -129,4 +129,3 @@ func (r *fakeRows) RawValues() [][]byte {
 func (r *fakeRows) Conn() *pgx.Conn {
 	return nil
 }
-

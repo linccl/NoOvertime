@@ -27,12 +27,12 @@ type webMonthSummariesQueryInput struct {
 }
 
 type webMonthSummary struct {
-	ID                  string `json:"id"`
+	ID                   string `json:"id"`
 	MonthStart           string `json:"month_start"`
 	WorkMinutesTotal     int    `json:"work_minutes_total"`
 	AdjustMinutesBalance int    `json:"adjust_minutes_balance"`
-	Version             int64  `json:"version"`
-	UpdatedAt           string `json:"updated_at"`
+	Version              int64  `json:"version"`
+	UpdatedAt            string `json:"updated_at"`
 }
 
 type webMonthSummariesQueryResponse struct {
@@ -152,7 +152,7 @@ SELECT id,
 
 		for rows.Next() {
 			var (
-				id                  string
+				id                   string
 				monthStart           time.Time
 				workMinutesTotal     int
 				adjustMinutesBalance int
@@ -171,12 +171,12 @@ SELECT id,
 			}
 
 			response.MonthSummaries = append(response.MonthSummaries, webMonthSummary{
-				ID:                  id,
+				ID:                   id,
 				MonthStart:           monthStart.Format("2006-01-02"),
 				WorkMinutesTotal:     workMinutesTotal,
 				AdjustMinutesBalance: adjustMinutesBalance,
-				Version:             version,
-				UpdatedAt:           updatedAt.UTC().Format(time.RFC3339),
+				Version:              version,
+				UpdatedAt:            updatedAt.UTC().Format(time.RFC3339),
 			})
 		}
 		if err := rows.Err(); err != nil {
@@ -190,4 +190,3 @@ SELECT id,
 
 	return response, nil
 }
-

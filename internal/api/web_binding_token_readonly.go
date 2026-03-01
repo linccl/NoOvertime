@@ -58,4 +58,3 @@ SELECT b.id,
 	}
 	return snapshot, nil
 }
-

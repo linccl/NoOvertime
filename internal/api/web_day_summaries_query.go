@@ -27,18 +27,18 @@ type webDaySummariesQueryInput struct {
 }
 
 type webDaySummary struct {
-	ID           string  `json:"id"`
-	LocalDate    string  `json:"local_date"`
-	StartAtUTC   *string `json:"start_at_utc"`
-	EndAtUTC     *string `json:"end_at_utc"`
-	IsLeaveDay   bool    `json:"is_leave_day"`
-	LeaveType    *string `json:"leave_type"`
-	IsLate       *bool   `json:"is_late"`
-	WorkMinutes  *int    `json:"work_minutes"`
-	AdjustMinutes *int   `json:"adjust_minutes"`
-	Status       string  `json:"status"`
-	Version      int64   `json:"version"`
-	UpdatedAt    string  `json:"updated_at"`
+	ID            string  `json:"id"`
+	LocalDate     string  `json:"local_date"`
+	StartAtUTC    *string `json:"start_at_utc"`
+	EndAtUTC      *string `json:"end_at_utc"`
+	IsLeaveDay    bool    `json:"is_leave_day"`
+	LeaveType     *string `json:"leave_type"`
+	IsLate        *bool   `json:"is_late"`
+	WorkMinutes   *int    `json:"work_minutes"`
+	AdjustMinutes *int    `json:"adjust_minutes"`
+	Status        string  `json:"status"`
+	Version       int64   `json:"version"`
+	UpdatedAt     string  `json:"updated_at"`
 }
 
 type webDaySummariesQueryResponse struct {
@@ -203,18 +203,18 @@ SELECT id,
 			}
 
 			response.DaySummaries = append(response.DaySummaries, webDaySummary{
-				ID:           id,
-				LocalDate:    localDate.Format("2006-01-02"),
-				StartAtUTC:   formatOptionalRFC3339(startAtUTC),
-				EndAtUTC:     formatOptionalRFC3339(endAtUTC),
-				IsLeaveDay:   isLeaveDay,
-				LeaveType:    leaveType,
-				IsLate:       isLate,
-				WorkMinutes:  workMinutes,
+				ID:            id,
+				LocalDate:     localDate.Format("2006-01-02"),
+				StartAtUTC:    formatOptionalRFC3339(startAtUTC),
+				EndAtUTC:      formatOptionalRFC3339(endAtUTC),
+				IsLeaveDay:    isLeaveDay,
+				LeaveType:     leaveType,
+				IsLate:        isLate,
+				WorkMinutes:   workMinutes,
 				AdjustMinutes: adjustMins,
-				Status:       status,
-				Version:      version,
-				UpdatedAt:    updatedAt.UTC().Format(time.RFC3339),
+				Status:        status,
+				Version:       version,
+				UpdatedAt:     updatedAt.UTC().Format(time.RFC3339),
 			})
 		}
 		if err := rows.Err(); err != nil {

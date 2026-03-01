@@ -274,12 +274,12 @@ type fakeWebMonthSummariesQueryDB struct {
 	loadErr        error
 	queryErr       error
 
-	withTxCalls            int
-	lastLookupHash         string
-	lastMonthQueryArgsLen  int
-	lastMonthQueryUserID   string
-	lastMonthQueryStart    string
-	lastMonthQueryEnd      string
+	withTxCalls           int
+	lastLookupHash        string
+	lastMonthQueryArgsLen int
+	lastMonthQueryUserID  string
+	lastMonthQueryStart   string
+	lastMonthQueryEnd     string
 }
 
 func (f *fakeWebMonthSummariesQueryDB) Health(context.Context) error {
@@ -384,4 +384,3 @@ func assertAPIError(t *testing.T, err error, wantStatus int, wantCode string) {
 		t.Fatalf("code = %q", apiErr.Code)
 	}
 }
-
