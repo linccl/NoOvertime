@@ -48,7 +48,7 @@
 
 ---
 
-## 2. 接口定义（10项）
+## 2. 接口定义（12项）
 
 ### 2.1 同步上报（Punch/LeaveRecord/DaySummary/MonthSummary 原子提交）
 
@@ -270,8 +270,8 @@
 
 ```json
 {
-  "pairing_code": "39481726",
-  "recovery_code": "AB12CD34EF56GH78",
+  "pairing_code": "<pairing_code>",
+  "recovery_code": "<recovery_code>",
   "to_device_id": "f2df11ef-7240-42b2-8ceb-623ad7711e0c"
 }
 ```
@@ -316,7 +316,7 @@
 
 ```json
 {
-  "pairing_code": "39481726",
+  "pairing_code": "<pairing_code>",
   "pairing_code_version": 3,
   "pairing_code_updated_at": "2026-02-12T08:00:00Z",
   "is_newly_generated": false
@@ -348,7 +348,7 @@
 
 ```json
 {
-  "pairing_code": "24069175",
+  "pairing_code": "<pairing_code>",
   "pairing_code_version": 4,
   "pairing_code_updated_at": "2026-02-12T10:32:00Z",
   "revoked_bindings_count": 2
@@ -381,8 +381,8 @@
 
 ```json
 {
-  "recovery_code": "AB12CD34EF56GH78",
-  "recovery_code_masked": "AB12********GH78",
+  "recovery_code": "<recovery_code>",
+  "recovery_code_masked": "<recovery_code_masked>",
   "shown_once": true,
   "updated_at": "2026-02-12T10:33:00Z"
 }
@@ -405,7 +405,7 @@
 
 ```json
 {
-  "old_recovery_code": "AB12CD34EF56GH78",
+  "old_recovery_code": "<recovery_code>",
   "force_reset": true
 }
 ```
@@ -414,8 +414,8 @@
 
 ```json
 {
-  "recovery_code": "K9PQ41MS77TX8N2D",
-  "recovery_code_masked": "K9PQ********8N2D",
+  "recovery_code": "<recovery_code>",
+  "recovery_code_masked": "<recovery_code_masked>",
   "shown_once": true,
   "updated_at": "2026-02-12T10:34:00Z"
 }
@@ -438,8 +438,8 @@
 
 ```json
 {
-  "pairing_code": "24069175",
-  "client_fingerprint": "9cfce7bcd5d6dfac2697fdf1f5b9f226",
+  "pairing_code": "<pairing_code>",
+  "client_fingerprint": "<client_fingerprint>",
   "web_device_name": "Chrome@Mac"
 }
 ```
@@ -449,7 +449,7 @@
 ```json
 {
   "binding_id": "6f9c8306-5f7f-45d5-bf84-0a31f7066bd4",
-  "binding_token": "wrb_eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "binding_token": "wrb_<binding_token>",
   "pairing_code_version": 4,
   "status": "ACTIVE",
   "created_at": "2026-02-12T10:35:00Z"
@@ -474,8 +474,8 @@
 
 ```json
 {
-  "binding_token": "wrb_eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "client_fingerprint": "9cfce7bcd5d6dfac2697fdf1f5b9f226"
+  "binding_token": "wrb_<binding_token>",
+  "client_fingerprint": "<client_fingerprint>"
 }
 ```
 
@@ -498,6 +498,98 @@
 - `WEB_BINDING_REACTIVATE_DENIED`
 - `WEB_BINDING_VERSION_MISMATCH`
 
+### 2.11 Web 看板 MonthSummary 查询（按年）
+
+- Method & Path：`POST /api/v1/web/month-summaries/query`
+- 幂等字段：`N/A`
+- 鉴权要求：`WebBindingToken`（请求体携带 `binding_token` + `client_fingerprint`；禁止客户端自带 `user_id`）
+- 限流策略：`WEB_PAIR_BIND`
+
+请求 JSON 示例：
+
+```json
+{
+  "binding_token": "wrb_<binding_token>",
+  "client_fingerprint": "<client_fingerprint>",
+  "year": 2026
+}
+```
+
+响应 JSON 示例：
+
+```json
+{
+  "month_summaries": [
+    {
+      "id": "<uuid>",
+      "month_start": "2026-02-01",
+      "work_minutes_total": 6120,
+      "adjust_minutes_balance": 120,
+      "version": 5,
+      "updated_at": "2026-02-12T10:21:00Z"
+    }
+  ]
+}
+```
+
+错误码列表：
+
+- `RATE_LIMIT_BLOCKED`
+- `INVALID_ARGUMENT`
+- `UNKNOWN_FIELD`
+- `UNAUTHORIZED_WEB_TOKEN`
+- `WEB_BINDING_REACTIVATE_DENIED`
+- `WEB_BINDING_VERSION_MISMATCH`
+
+### 2.12 Web 看板 DaySummary 查询（按月）
+
+- Method & Path：`POST /api/v1/web/day-summaries/query`
+- 幂等字段：`N/A`
+- 鉴权要求：`WebBindingToken`（请求体携带 `binding_token` + `client_fingerprint`；禁止客户端自带 `user_id`）
+- 限流策略：`WEB_PAIR_BIND`
+
+请求 JSON 示例：
+
+```json
+{
+  "binding_token": "wrb_<binding_token>",
+  "client_fingerprint": "<client_fingerprint>",
+  "month_start": "2026-02-01"
+}
+```
+
+响应 JSON 示例：
+
+```json
+{
+  "day_summaries": [
+    {
+      "id": "<uuid>",
+      "local_date": "2026-02-12",
+      "start_at_utc": "2026-02-12T01:10:00Z",
+      "end_at_utc": "2026-02-12T10:20:00Z",
+      "is_leave_day": false,
+      "leave_type": null,
+      "is_late": true,
+      "work_minutes": 550,
+      "adjust_minutes": 0,
+      "status": "COMPUTED",
+      "version": 5,
+      "updated_at": "2026-02-12T10:21:00Z"
+    }
+  ]
+}
+```
+
+错误码列表：
+
+- `RATE_LIMIT_BLOCKED`
+- `INVALID_ARGUMENT`
+- `UNKNOWN_FIELD`
+- `UNAUTHORIZED_WEB_TOKEN`
+- `WEB_BINDING_REACTIVATE_DENIED`
+- `WEB_BINDING_VERSION_MISMATCH`
+
 ---
 
 ## 附录 A：FR -> 接口覆盖映射表
@@ -515,7 +607,7 @@
 | FR-029 | 删除打卡后重算并同步 | `2.1 同步上报`（载荷含删除态与重算结果） |
 | FR-031 | FULL_DAY 与 AUTO 打卡不可共存 | `2.1 同步上报` |
 | FR-032 | 分钟粒度存储与一致性校验 | `2.1 同步上报` |
-| FR-033 | MonthSummary 由移动端同步，Web 仅读取展示 | `2.1 同步上报`、`2.10 Web 只读绑定鉴权`（读取入口鉴权） |
+| FR-033 | MonthSummary 由移动端同步，Web 仅读取展示 | `2.1 同步上报`、`2.10 Web 只读绑定鉴权`（读取入口鉴权）、`2.11 Web 看板 MonthSummary 查询`、`2.12 Web 看板 DaySummary 查询` |
 
 ---
 
