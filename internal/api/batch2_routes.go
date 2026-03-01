@@ -13,6 +13,8 @@ const (
 	recoveryCodeResetPath     = "/api/v1/recovery-code/reset"
 	webReadBindingsPath       = "/api/v1/web/read-bindings"
 	webReadBindingsAuthPath   = "/api/v1/web/read-bindings/auth"
+	webMonthSummariesQueryPath = "/api/v1/web/month-summaries/query"
+	webDaySummariesQueryPath   = "/api/v1/web/day-summaries/query"
 	batch2NotImplementedError = "endpoint is registered but not implemented"
 )
 
