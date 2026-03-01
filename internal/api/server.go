@@ -79,6 +79,8 @@ func NewServer(addr string, db HealthChecker) *Server {
 	s.handle(recoveryCodeResetPath, s.recoveryCodeResetHandler)
 	s.handle(webReadBindingsPath, s.webReadBindingsHandler)
 	s.handle(webReadBindingsAuthPath, s.webReadBindingsAuthHandler)
+	s.handle(webMonthSummariesQueryPath, s.webMonthSummariesQueryHandler)
+	s.handle(webDaySummariesQueryPath, s.webDaySummariesQueryHandler)
 	s.httpServer = &http.Server{
 		Addr:    addr,
 		Handler: s.requestIDMiddleware(s.requestLogMiddleware(s.recoveryMiddleware(mux))),
