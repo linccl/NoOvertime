@@ -35,7 +35,7 @@ type webDaySummary struct {
 	LeaveType    *string `json:"leave_type"`
 	IsLate       *bool   `json:"is_late"`
 	WorkMinutes  *int    `json:"work_minutes"`
-	AdjustMinute *int    `json:"adjust_minutes"`
+	AdjustMinutes *int   `json:"adjust_minutes"`
 	Status       string  `json:"status"`
 	Version      int64   `json:"version"`
 	UpdatedAt    string  `json:"updated_at"`
@@ -211,7 +211,7 @@ SELECT id,
 				LeaveType:    leaveType,
 				IsLate:       isLate,
 				WorkMinutes:  workMinutes,
-				AdjustMinute: adjustMins,
+				AdjustMinutes: adjustMins,
 				Status:       status,
 				Version:      version,
 				UpdatedAt:    updatedAt.UTC().Format(time.RFC3339),
@@ -228,4 +228,3 @@ SELECT id,
 
 	return response, nil
 }
-
