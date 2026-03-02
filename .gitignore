@@ -1,1 +1,5 @@
 .swarm-worktrees/
+AGENTS.md
+**/.DS_Store
+.claude/
+.gocache/

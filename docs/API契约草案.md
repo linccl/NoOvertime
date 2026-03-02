@@ -17,7 +17,7 @@
 
 - `DeviceAuth`：移动端写接口，`Authorization: Bearer <device_access_token>`
 - `WriterDeviceOnly`：必须是当前写入端（`device_id == users.writer_device_id` 且 `writer_epoch == users.writer_epoch`）
-- `WebBindingToken`：Web 只读令牌，`Authorization: Bearer <web_binding_token>`
+- `WebBindingToken`：Web 只读令牌，请求体携带 `binding_token` + `client_fingerprint`
 - `Anonymous`：无需登录，但仍需限流与设备指纹
 
 ### 1.3 通用错误响应

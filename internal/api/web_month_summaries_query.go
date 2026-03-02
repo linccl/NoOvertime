@@ -120,7 +120,7 @@ func queryWebMonthSummaries(
 	end := time.Date(input.Year+1, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	err := txDB.WithTx(ctx, func(tx pgx.Tx) error {
-		userID, err := authenticateWebBindingReadOnly(ctx, tx, input.BindingToken, input.ClientFingerprint)
+		userID, err := authenticateWebBindingReadOnlyAndTouchLastSeenAt(ctx, tx, input.BindingToken, input.ClientFingerprint)
 		if err != nil {
 			return err
 		}

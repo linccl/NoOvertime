@@ -22,6 +22,7 @@ fmt-check:
 		echo "No Go files found."; \
 		exit 0; \
 	fi; \
+	command -v gofmt >/dev/null 2>&1 || { echo "gofmt not found"; exit 1; }; \
 	unformatted="$$(gofmt -l $$files)"; \
 	if [ -n "$$unformatted" ]; then \
 		echo "Found unformatted Go files:"; \

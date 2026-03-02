@@ -134,7 +134,7 @@ func queryWebDaySummaries(
 	end := input.MonthStart.AddDate(0, 1, 0)
 
 	err := txDB.WithTx(ctx, func(tx pgx.Tx) error {
-		userID, err := authenticateWebBindingReadOnly(ctx, tx, input.BindingToken, input.ClientFingerprint)
+		userID, err := authenticateWebBindingReadOnlyAndTouchLastSeenAt(ctx, tx, input.BindingToken, input.ClientFingerprint)
 		if err != nil {
 			return err
 		}

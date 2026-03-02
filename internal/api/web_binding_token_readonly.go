@@ -30,6 +30,29 @@ func authenticateWebBindingReadOnly(
 	return snapshot.UserID, nil
 }
 
+func authenticateWebBindingReadOnlyAndTouchLastSeenAt(
+	ctx context.Context,
+	tx pgx.Tx,
+	bindingToken string,
+	clientFingerprint string,
+) (string, error) {
+	tokenHash := hashWebBindingCredential(bindingToken, clientFingerprint)
+	snapshot, err := loadWebReadBindingByTokenHash(ctx, tx, tokenHash)
+	if err != nil {
+		return "", err
+	}
+	if snapshot.Status != webBindingStatusActive {
+		return "", apperrors.New(http.StatusConflict, webBindingReactivateDeniedCode, "revoked web binding cannot be re-activated")
+	}
+	if snapshot.BindingPairingCodeVersion != snapshot.CurrentPairingCodeVersion {
+		return "", apperrors.New(http.StatusConflict, webBindingVersionMismatchCode, "web binding version mismatch")
+	}
+	if _, err := touchWebReadBindingLastSeenAt(ctx, tx, snapshot.BindingID); err != nil {
+		return "", err
+	}
+	return snapshot.UserID, nil
+}
+
 func loadWebReadBindingByTokenHashReadOnly(ctx context.Context, tx pgx.Tx, tokenHash string) (webReadBindingsAuthSnapshot, error) {
 	const query = `
 SELECT b.id,

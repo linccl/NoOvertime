@@ -108,6 +108,12 @@ func TestWebDaySummariesQueryRouteSuccess(t *testing.T) {
 	if db.lastDayQueryStart != "2026-02-01" || db.lastDayQueryEnd != "2026-03-01" {
 		t.Fatalf("day query range = [%s, %s)", db.lastDayQueryStart, db.lastDayQueryEnd)
 	}
+	if db.touchCalls != 1 {
+		t.Fatalf("touchCalls = %d", db.touchCalls)
+	}
+	if db.lastTouchBindingID != db.snapshot.BindingID {
+		t.Fatalf("lastTouchBindingID = %q", db.lastTouchBindingID)
+	}
 }
 
 func TestWebDaySummariesQueryRouteEmpty(t *testing.T) {
@@ -142,6 +148,12 @@ func TestWebDaySummariesQueryRouteEmpty(t *testing.T) {
 	}
 	if len(body.DaySummaries) != 0 {
 		t.Fatalf("day_summaries size = %d", len(body.DaySummaries))
+	}
+	if db.touchCalls != 1 {
+		t.Fatalf("touchCalls = %d", db.touchCalls)
+	}
+	if db.lastTouchBindingID != db.snapshot.BindingID {
+		t.Fatalf("lastTouchBindingID = %q", db.lastTouchBindingID)
 	}
 }
 
@@ -290,9 +302,12 @@ type fakeWebDaySummariesQueryDB struct {
 	dayRows        [][]any
 	loadErr        error
 	queryErr       error
+	lastSeenAt     time.Time
 
 	withTxCalls         int
 	lastLookupHash      string
+	touchCalls          int
+	lastTouchBindingID  string
 	lastDayQueryArgsLen int
 	lastDayQueryUserID  string
 	lastDayQueryStart   string
@@ -357,7 +372,8 @@ func (f *fakeWebDaySummariesQueryTx) Query(_ context.Context, query string, args
 }
 
 func (f *fakeWebDaySummariesQueryTx) QueryRow(_ context.Context, query string, args ...any) pgx.Row {
-	if strings.Contains(query, "FROM web_read_bindings b") && strings.Contains(query, "WHERE b.token_hash = $1") {
+	switch {
+	case strings.Contains(query, "FROM web_read_bindings b") && strings.Contains(query, "WHERE b.token_hash = $1"):
 		return fakeWebReadBindingsAuthRow{scanFn: func(dest ...any) error {
 			if f.db.loadErr != nil {
 				return f.db.loadErr
@@ -378,6 +394,24 @@ func (f *fakeWebDaySummariesQueryTx) QueryRow(_ context.Context, query string, a
 			*dest[2].(*string) = f.db.snapshot.Status
 			*dest[3].(*int64) = f.db.snapshot.BindingPairingCodeVersion
 			*dest[4].(*int64) = f.db.snapshot.CurrentPairingCodeVersion
+			return nil
+		}}
+	case strings.Contains(query, "UPDATE web_read_bindings") && strings.Contains(query, "SET last_seen_at = now()"):
+		return fakeWebReadBindingsAuthRow{scanFn: func(dest ...any) error {
+			f.db.touchCalls++
+			if len(args) >= 1 {
+				if bindingID, ok := args[0].(string); ok {
+					f.db.lastTouchBindingID = bindingID
+				}
+			}
+			if len(dest) != 1 {
+				return errors.New("invalid destination fields for last_seen_at")
+			}
+			lastSeenAtPtr, ok := dest[0].(*time.Time)
+			if !ok {
+				return errors.New("dest[0] must be *time.Time")
+			}
+			*lastSeenAtPtr = f.db.lastSeenAt
 			return nil
 		}}
 	}
