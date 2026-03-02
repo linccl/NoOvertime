@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NoOvertime - Web Dashboard (MVP)</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+          monospace;
+        --fg: #111;
+        --muted: #666;
+        --bg: #fff;
+        --card: #f6f6f6;
+        --border: #ddd;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fg: #eee;
+          --muted: #aaa;
+          --bg: #121212;
+          --card: #1a1a1a;
+          --border: #333;
+        }
+      }
+      body {
+        margin: 0;
+        padding: 24px;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        color: var(--fg);
+        background: var(--bg);
+        line-height: 1.4;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 20px;
+      }
+      .hint {
+        margin: 0 0 16px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+      @media (min-width: 980px) {
+        .grid {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+      .card {
+        border: 1px solid var(--border);
+        background: var(--card);
+        border-radius: 10px;
+        padding: 12px;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 160px 1fr;
+        gap: 8px;
+        align-items: center;
+        margin: 8px 0;
+      }
+      label {
+        font-size: 13px;
+        color: var(--muted);
+      }
+      input,
+      textarea,
+      button {
+        font: 13px/1.3 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      }
+      input,
+      textarea {
+        width: 100%;
+        box-sizing: border-box;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        padding: 8px 10px;
+        background: var(--bg);
+        color: var(--fg);
+      }
+      textarea {
+        font-family: var(--mono);
+        min-height: 110px;
+        resize: vertical;
+      }
+      button {
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        padding: 8px 10px;
+        background: var(--bg);
+        color: var(--fg);
+        cursor: pointer;
+      }
+      button:hover {
+        filter: brightness(0.98);
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .mono {
+        font-family: var(--mono);
+      }
+      pre {
+        margin: 0;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        padding: 12px;
+        background: var(--bg);
+        overflow: auto;
+        font: 12px/1.4 var(--mono);
+        min-height: 240px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font: 12px/1.4 var(--mono);
+      }
+      th,
+      td {
+        border-bottom: 1px solid var(--border);
+        padding: 6px 8px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        color: var(--muted);
+        font-weight: 600;
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 10px;
+      }
+      details summary {
+        cursor: pointer;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .error {
+        color: #b00020;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>NoOvertime - Web Dashboard (MVP)</h1>
+    <p class="hint">
+      Open this page from the API server to keep same-origin fetch working (example:
+      <span class="mono">http://127.0.0.1:8080/web/</span>).
+    </p>
+
+    <div class="grid">
+      <div class="card">
+        <h2 style="margin: 0 0 10px; font-size: 16px">Client</h2>
+
+        <div class="row">
+          <label for="fingerprint">client_fingerprint</label>
+          <div style="display: flex; gap: 8px">
+            <input id="fingerprint" class="mono" readonly />
+            <button id="regenFingerprint" type="button" style="white-space: nowrap">Regenerate</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="bindingToken">binding_token</label>
+          <div style="display: flex; gap: 8px">
+            <input id="bindingToken" class="mono" />
+            <button id="clearToken" type="button" style="white-space: nowrap">Clear</button>
+          </div>
+        </div>
+
+        <details style="margin-top: 10px">
+          <summary>Advanced: extra JSON body fields (may fail on strict JSON endpoints)</summary>
+          <div style="margin-top: 10px">
+            <label for="extraJson">extra_json</label>
+            <textarea
+              id="extraJson"
+              class="mono"
+              placeholder='{"example_key":"example_value"}'
+            ></textarea>
+          </div>
+        </details>
+      </div>
+
+      <div class="card">
+        <h2 style="margin: 0 0 10px; font-size: 16px">1) Bind (pairing_code -&gt; binding_token)</h2>
+
+        <div class="row">
+          <label for="pairingCode">pairing_code</label>
+          <input id="pairingCode" class="mono" placeholder="8 digits" />
+        </div>
+        <div class="row">
+          <label for="webDeviceName">web_device_name</label>
+          <input id="webDeviceName" class="mono" placeholder="Chrome@Local" />
+        </div>
+        <div class="actions">
+          <button id="bindBtn" type="button">POST /api/v1/web/read-bindings</button>
+        </div>
+
+        <hr style="border: 0; border-top: 1px solid var(--border); margin: 14px 0" />
+
+        <h2 style="margin: 0 0 10px; font-size: 16px">2) Auth</h2>
+        <div class="actions">
+          <button id="authBtn" type="button">POST /api/v1/web/read-bindings/auth</button>
+        </div>
+
+        <hr style="border: 0; border-top: 1px solid var(--border); margin: 14px 0" />
+
+        <h2 style="margin: 0 0 10px; font-size: 16px">3) Month summaries</h2>
+        <div class="row">
+          <label for="year">year</label>
+          <input id="year" class="mono" type="number" min="1970" max="2100" step="1" />
+        </div>
+        <div class="actions">
+          <button id="monthQueryBtn" type="button">POST /api/v1/web/month-summaries/query</button>
+        </div>
+        <div id="months"></div>
+
+        <hr style="border: 0; border-top: 1px solid var(--border); margin: 14px 0" />
+
+        <h2 style="margin: 0 0 10px; font-size: 16px">4) Day summaries</h2>
+        <div class="row">
+          <label for="monthStart">month_start</label>
+          <input id="monthStart" class="mono" placeholder="YYYY-MM-01" />
+        </div>
+        <div class="actions">
+          <button id="dayQueryBtn" type="button">POST /api/v1/web/day-summaries/query</button>
+        </div>
+        <div id="days"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top: 12px">
+      <h2 style="margin: 0 0 10px; font-size: 16px">Output</h2>
+      <pre id="output">{}</pre>
+    </div>
+
+    <script>
+      "use strict";
+
+      const storageKeys = {
+        fingerprint: "noovertime_client_fingerprint",
+        token: "noovertime_binding_token",
+        pairingCode: "noovertime_pairing_code",
+        webDeviceName: "noovertime_web_device_name",
+      };
+
+      function $(id) {
+        const el = document.getElementById(id);
+        if (!el) throw new Error(`missing element: ${id}`);
+        return el;
+      }
+
+      function randomHex(bytes) {
+        const buf = new Uint8Array(bytes);
+        crypto.getRandomValues(buf);
+        return Array.from(buf)
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("");
+      }
+
+      function loadOrInitFingerprint() {
+        const existing = localStorage.getItem(storageKeys.fingerprint);
+        if (existing && existing.trim()) return existing.trim();
+        const next = randomHex(16);
+        localStorage.setItem(storageKeys.fingerprint, next);
+        return next;
+      }
+
+      function nowYear() {
+        return new Date().getFullYear();
+      }
+
+      function safeParseJSON(text) {
+        if (!text) return null;
+        try {
+          return JSON.parse(text);
+        } catch {
+          return null;
+        }
+      }
+
+      function readExtraJSON() {
+        const raw = $("extraJson").value.trim();
+        if (!raw) return {};
+        const parsed = safeParseJSON(raw);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          throw new Error("extra_json must be a JSON object");
+        }
+        return parsed;
+      }
+
+      function setOutput(payload) {
+        $("output").textContent = JSON.stringify(payload, null, 2);
+      }
+
+      function setErrorOutput(message, detail) {
+        const payload = { ok: false, error: message };
+        if (detail !== undefined) payload.detail = detail;
+        setOutput(payload);
+      }
+
+      async function postJSON(path, body) {
+        const response = await fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+        const text = await response.text();
+        const data = safeParseJSON(text) ?? text;
+        return {
+          ok: response.ok,
+          status: response.status,
+          status_text: response.statusText,
+          data,
+        };
+      }
+
+      function renderTable(container, rows, onSelect) {
+        if (!Array.isArray(rows) || rows.length === 0) {
+          container.innerHTML = "<p class='hint'>No items.</p>";
+          return;
+        }
+
+        const keys = Array.from(
+          rows.reduce((set, row) => {
+            if (row && typeof row === "object" && !Array.isArray(row)) {
+              for (const k of Object.keys(row)) set.add(k);
+            }
+            return set;
+          }, new Set()),
+        );
+
+        const cols = keys.slice(0, 8); // keep it readable; raw JSON is always in Output.
+        const head =
+          "<tr>" +
+          (onSelect ? "<th></th>" : "") +
+          cols.map((k) => `<th>${k}</th>`).join("") +
+          "</tr>";
+        const body = rows
+          .map((row) => {
+            const selectCell = onSelect
+              ? `<td><button type="button" data-select="${onSelect.key(row)}">Select</button></td>`
+              : "";
+            const cells = cols
+              .map((k) => {
+                const v = row ? row[k] : null;
+                const display =
+                  v === null || v === undefined ? "" : typeof v === "string" ? v : JSON.stringify(v);
+                return `<td>${escapeHTML(display)}</td>`;
+              })
+              .join("");
+            return `<tr>${selectCell}${cells}</tr>`;
+          })
+          .join("");
+
+        container.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+
+        if (onSelect) {
+          container.querySelectorAll("button[data-select]").forEach((btn) => {
+            btn.addEventListener("click", () => onSelect.onClick(btn.getAttribute("data-select")));
+          });
+        }
+      }
+
+      function escapeHTML(s) {
+        return String(s)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function syncUIFromStorage() {
+        $("fingerprint").value = loadOrInitFingerprint();
+        $("bindingToken").value = (localStorage.getItem(storageKeys.token) || "").trim();
+        $("pairingCode").value = (localStorage.getItem(storageKeys.pairingCode) || "").trim();
+        $("webDeviceName").value =
+          (localStorage.getItem(storageKeys.webDeviceName) || "Chrome@Local").trim();
+        $("year").value = String(nowYear());
+      }
+
+      async function handleBind() {
+        const pairingCode = $("pairingCode").value.trim();
+        const webDeviceName = $("webDeviceName").value.trim();
+        const fingerprint = $("fingerprint").value.trim();
+
+        localStorage.setItem(storageKeys.pairingCode, pairingCode);
+        localStorage.setItem(storageKeys.webDeviceName, webDeviceName);
+
+        if (!pairingCode) return setErrorOutput("pairing_code is required");
+        if (!webDeviceName) return setErrorOutput("web_device_name is required");
+        if (!fingerprint) return setErrorOutput("client_fingerprint is required");
+
+        const body = {
+          pairing_code: pairingCode,
+          client_fingerprint: fingerprint,
+          web_device_name: webDeviceName,
+        };
+
+        setOutput({ request: { path: "/api/v1/web/read-bindings", body } });
+
+        try {
+          const result = await postJSON("/api/v1/web/read-bindings", body);
+          const token =
+            result && result.data && typeof result.data === "object" ? result.data.binding_token : "";
+          if (typeof token === "string" && token.trim()) {
+            localStorage.setItem(storageKeys.token, token.trim());
+            $("bindingToken").value = token.trim();
+          }
+          setOutput({ request: { path: "/api/v1/web/read-bindings", body }, response: result });
+        } catch (err) {
+          setErrorOutput("bind request failed", String(err));
+        }
+      }
+
+      async function handleAuth() {
+        const token = $("bindingToken").value.trim();
+        const fingerprint = $("fingerprint").value.trim();
+        if (!token) return setErrorOutput("binding_token is required");
+        if (!fingerprint) return setErrorOutput("client_fingerprint is required");
+
+        localStorage.setItem(storageKeys.token, token);
+
+        let extra = {};
+        try {
+          extra = readExtraJSON();
+        } catch (err) {
+          return setErrorOutput("invalid extra_json", String(err));
+        }
+
+        const body = { binding_token: token, client_fingerprint: fingerprint, ...extra };
+        setOutput({ request: { path: "/api/v1/web/read-bindings/auth", body } });
+
+        try {
+          const result = await postJSON("/api/v1/web/read-bindings/auth", body);
+          setOutput({ request: { path: "/api/v1/web/read-bindings/auth", body }, response: result });
+        } catch (err) {
+          setErrorOutput("auth request failed", String(err));
+        }
+      }
+
+      async function handleMonthQuery() {
+        const token = $("bindingToken").value.trim();
+        const fingerprint = $("fingerprint").value.trim();
+        const year = Number($("year").value);
+        if (!token) return setErrorOutput("binding_token is required");
+        if (!fingerprint) return setErrorOutput("client_fingerprint is required");
+        if (!Number.isFinite(year) || year < 1970 || year > 2100) return setErrorOutput("year is invalid");
+
+        localStorage.setItem(storageKeys.token, token);
+
+        let extra = {};
+        try {
+          extra = readExtraJSON();
+        } catch (err) {
+          return setErrorOutput("invalid extra_json", String(err));
+        }
+
+        const body = { binding_token: token, client_fingerprint: fingerprint, year, ...extra };
+        setOutput({ request: { path: "/api/v1/web/month-summaries/query", body } });
+
+        try {
+          const result = await postJSON("/api/v1/web/month-summaries/query", body);
+          setOutput({ request: { path: "/api/v1/web/month-summaries/query", body }, response: result });
+
+          const months =
+            result && result.data && typeof result.data === "object" ? result.data.month_summaries : null;
+          renderTable($("months"), months, {
+            key: (row) => (row && typeof row === "object" ? row.month_start || "" : ""),
+            onClick: (monthStart) => {
+              if (monthStart) {
+                $("monthStart").value = String(monthStart);
+                handleDayQuery();
+              }
+            },
+          });
+        } catch (err) {
+          setErrorOutput("month query request failed", String(err));
+        }
+      }
+
+      async function handleDayQuery() {
+        const token = $("bindingToken").value.trim();
+        const fingerprint = $("fingerprint").value.trim();
+        const monthStart = $("monthStart").value.trim();
+        if (!token) return setErrorOutput("binding_token is required");
+        if (!fingerprint) return setErrorOutput("client_fingerprint is required");
+        if (!monthStart) return setErrorOutput("month_start is required");
+
+        localStorage.setItem(storageKeys.token, token);
+
+        let extra = {};
+        try {
+          extra = readExtraJSON();
+        } catch (err) {
+          return setErrorOutput("invalid extra_json", String(err));
+        }
+
+        const body = { binding_token: token, client_fingerprint: fingerprint, month_start: monthStart, ...extra };
+        setOutput({ request: { path: "/api/v1/web/day-summaries/query", body } });
+
+        try {
+          const result = await postJSON("/api/v1/web/day-summaries/query", body);
+          setOutput({ request: { path: "/api/v1/web/day-summaries/query", body }, response: result });
+
+          const days =
+            result && result.data && typeof result.data === "object" ? result.data.day_summaries : null;
+          renderTable($("days"), days);
+        } catch (err) {
+          setErrorOutput("day query request failed", String(err));
+        }
+      }
+
+      function bindUI() {
+        $("regenFingerprint").addEventListener("click", () => {
+          const next = randomHex(16);
+          localStorage.setItem(storageKeys.fingerprint, next);
+          $("fingerprint").value = next;
+        });
+
+        $("clearToken").addEventListener("click", () => {
+          localStorage.removeItem(storageKeys.token);
+          $("bindingToken").value = "";
+        });
+
+        $("bindBtn").addEventListener("click", handleBind);
+        $("authBtn").addEventListener("click", handleAuth);
+        $("monthQueryBtn").addEventListener("click", handleMonthQuery);
+        $("dayQueryBtn").addEventListener("click", handleDayQuery);
+
+        $("bindingToken").addEventListener("change", () => {
+          localStorage.setItem(storageKeys.token, $("bindingToken").value.trim());
+        });
+      }
+
+      syncUIFromStorage();
+      bindUI();
+    </script>
+  </body>
+</html>
+

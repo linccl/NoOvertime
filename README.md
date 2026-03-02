@@ -57,6 +57,12 @@ export DATABASE_DSN='postgres://<user>:<password>@localhost:5432/no_overtime?ssl
 go run ./cmd/api
 ```
 
+### 5. Web 看板（静态页）
+
+启动后访问：
+
+- `http://127.0.0.1:8080/web/`
+
 ## 接口快速示例
 
 ### 健康检查

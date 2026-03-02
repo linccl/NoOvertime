@@ -81,6 +81,8 @@ func NewServer(addr string, db HealthChecker) *Server {
 	s.handle(webReadBindingsAuthPath, s.webReadBindingsAuthHandler)
 	s.handle(webMonthSummariesQueryPath, s.webMonthSummariesQueryHandler)
 	s.handle(webDaySummariesQueryPath, s.webDaySummariesQueryHandler)
+
+	mux.Handle("/web/", http.StripPrefix("/web/", http.FileServer(http.Dir("./web"))))
 	s.httpServer = &http.Server{
 		Addr:    addr,
 		Handler: s.requestIDMiddleware(s.requestLogMiddleware(s.recoveryMiddleware(mux))),
