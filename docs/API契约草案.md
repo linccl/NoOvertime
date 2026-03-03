@@ -10,13 +10,13 @@
 
 - Base URL：`/api/v1`
 - 数据格式：`application/json; charset=utf-8`
-- 时间格式：ISO8601 UTC（示例：`2026-02-12T01:23:00Z`）
-- 所有写接口在入库前执行分钟截断（向下取整），详见“附录 G”
+- 时间格式：RFC3339 UTC（不含毫秒，示例：`2026-02-12T01:23:00Z`）
+- 打卡时间字段 `punch_records[].at_utc` 必须为分钟精度（秒/毫秒为 0），否则返回 `TIME_PRECISION_INVALID`（详见“附录 G”）
 
 ### 1.2 鉴权模型
 
-- `DeviceAuth`：移动端写接口，`Authorization: Bearer <device_access_token>`
-- `WriterDeviceOnly`：必须是当前写入端（`device_id == users.writer_device_id` 且 `writer_epoch == users.writer_epoch`）
+- `DeviceAuth`：移动端部分写接口（配对码/恢复码），请求头携带 `Authorization: Bearer <device_access_token>` + `X-User-ID` + `X-Device-ID` + `X-Writer-Epoch`
+- `WriterDeviceOnly`：必须是当前写入端（`sync/commits` 与配对码/恢复码接口校验 `device_id == users.writer_device_id` 且 `writer_epoch == users.writer_epoch`；迁移相关接口当前仅校验设备 ID 匹配当前 writer）
 - `WebBindingToken`：Web 只读令牌，请求体携带 `binding_token` + `client_fingerprint`
 - `Anonymous`：无需登录，但仍需限流与设备指纹
 
@@ -46,6 +46,11 @@
 - `scene + subject_hash + GLOBAL`
 - `scene + GLOBAL + client_fingerprint_hash`
 
+补充说明（MVP 实现细节）：
+
+- Web 侧接口：`client_fingerprint_hash` 来源为请求体字段 `client_fingerprint`。
+- 移动端写接口（迁移申请/确认/强制接管、配对码重置、恢复码生成/重置）：`client_fingerprint_hash` 来源为 Header `X-Client-Fingerprint`；若缺省服务端会用对应设备 ID（`from_device_id/operator_device_id/to_device_id` 或 `X-Device-ID`）兜底。
+
 ---
 
 ## 2. 接口定义（12项）
@@ -54,8 +59,8 @@
 
 - Method & Path：`POST /api/v1/sync/commits`
 - 幂等字段：`sync_id` + `payload_hash`
-- 鉴权要求：`DeviceAuth + WriterDeviceOnly`
-- 限流策略：通用写入限流（网关层），并叠加写入端校验（`SYNC_COMMIT_STALE_WRITER`）
+- 鉴权要求：`Anonymous + WriterDeviceOnly`（MVP：不校验 `DeviceAuth`）
+- 限流策略：通用写入限流（网关层），并叠加写入端校验（失败映射为 `STALE_WRITER_REJECTED`；DB `error_key=SYNC_COMMIT_STALE_WRITER`）
 
 请求 JSON 示例：
 
@@ -65,7 +70,7 @@
   "device_id": "0b854f80-0213-4cb1-b5d0-95af02f137f3",
   "writer_epoch": 12,
   "sync_id": "bb5166cb-13ed-47a0-9fb5-58e2062a3559",
-  "payload_hash": "3619f3c484d26f31d1942436d2c3010f9a11f706f5f554d224595b3db6b7559d",
+  "payload_hash": "abe0945d40deb79e2dbabd4a73933e338ac622d51e2732ee37ec8aa96981f190",
   "punch_records": [
     {
       "id": "4acb45c8-65cb-4e20-9602-2ac3609d5c28",
@@ -175,7 +180,6 @@
 - `INVALID_ARGUMENT`
 - `UNKNOWN_FIELD`
 - `SYNC_ID_CONFLICT`
-- `LOW_OR_EQUAL_VERSION_NOOP`（HTTP 200，非失败）
 - `PUNCH_END_REQUIRES_START`
 - `PUNCH_END_NOT_AFTER_START`
 - `CONFLICT_AUTO_PUNCH_FULL_DAY_LEAVE`
@@ -183,11 +187,15 @@
 - `TIME_FIELDS_MISMATCH`
 - `STALE_WRITER_REJECTED`
 
+补充：
+
+- 低/同版本属于 `NOOP` 语义：HTTP 200 + `gate_result=NOOP` + `gate_reason=LOW_OR_EQUAL_VERSION`，不返回 `error_code`。
+
 ### 2.2 迁移申请（普通迁移）
 
 - Method & Path：`POST /api/v1/migrations/requests`
 - 幂等字段：`N/A`
-- 鉴权要求：`DeviceAuth`（新设备）+ `WriterDeviceOnly`（`from_device_id` 必须匹配当前 writer）
+- 鉴权要求：`Anonymous + WriterDeviceOnly`（MVP：不校验 `DeviceAuth`；`from_device_id` 必须匹配当前 writer）
 - 限流策略：`MIGRATION_REQUEST`
 
 请求 JSON 示例：
@@ -226,7 +234,7 @@
 
 - Method & Path：`POST /api/v1/migrations/{migration_request_id}/confirm`
 - 幂等字段：`N/A`
-- 鉴权要求：`DeviceAuth + WriterDeviceOnly`（旧机确认）
+- 鉴权要求：`Anonymous + WriterDeviceOnly`（MVP：不校验 `DeviceAuth`；旧机确认）
 - 限流策略：`MIGRATION_CONFIRM`
 
 请求 JSON 示例：
@@ -263,7 +271,7 @@
 
 - Method & Path：`POST /api/v1/migrations/forced-takeover`
 - 幂等字段：`N/A`
-- 鉴权要求：`DeviceAuth`（新设备会话）+ `Anonymous` 输入 `pairing_code`、`recovery_code`
+- 鉴权要求：`Anonymous`（MVP：不校验 `DeviceAuth`；请求体输入 `pairing_code`、`recovery_code`）
 - 限流策略：先走 `RECOVERY_VERIFY`，再走 `MIGRATION_REQUEST`
 
 请求 JSON 示例：
@@ -630,9 +638,9 @@
 | REJECTED | `P0001 + WEB_BINDING_VERSION_IMMUTABLE` | `WEB_BINDING_VERSION_IMMUTABLE` | 业务拒绝 |
 | REJECTED | `P0001 + WEB_BINDING_USER_ID_IMMUTABLE` | `WEB_BINDING_USER_IMMUTABLE` | 业务拒绝 |
 | REJECTED | `P0001 + WEB_BINDING_USER_NOT_FOUND` | `USER_NOT_FOUND` | 业务拒绝 |
-| REJECTED | `P0001 + RECORD_USER_ID_IMMUTABLE` | `RECORD_USER_IMMUTABLE` | 业务拒绝 |
+| ERROR | `P0001 + RECORD_USER_ID_IMMUTABLE` | `INTERNAL_ERROR` | 当前实现未映射该 error_key（HTTP 500） |
 | REJECTED | `P0001 + ROTATE_PAIRING_USER_NOT_FOUND` | `USER_NOT_FOUND` | 业务拒绝 |
-| REJECTED | `P0001 + SECURITY_SCENE_UNSUPPORTED` | `INTERNAL_RULE_UNSUPPORTED` | 内部配置错误，拒绝 |
+| ERROR | `P0001 + SECURITY_SCENE_UNSUPPORTED` | `INTERNAL_ERROR` | 内部配置错误（HTTP 500） |
 | REJECTED | 规则 `RULE_PAIRING_CODE_LOOKUP_MISS_AFTER_RESET`（重置后旧配对码不再命中） | `PAIRING_CODE_INVALID` | 旧配对码绑定失败 |
 | REJECTED | 规则 `RULE_RECOVERY_CODE_HASH_MISMATCH_AFTER_RESET`（重置后旧恢复码哈希不匹配） | `RECOVERY_CODE_INVALID` | 旧恢复码验证失败 |
 | REJECTED | `23505 + uq_sync_commits_user_sync` 且 payload_hash 不同 | `SYNC_ID_CONFLICT` + `gate_result=REJECTED` + `gate_reason=SYNC_ID_CONFLICT` | 幂等冲突拒绝 |
@@ -702,7 +710,7 @@ FR-031 规则族统一说明：`AUTO_PUNCH_ON_FULL_DAY_LEAVE` 与 `FULL_DAY_LEAV
 
 - 算法：`SHA-256`
 - 输出：小写十六进制
-- 输入：UTF-8 编码的“规范化 JSON”（无额外空白）
+- 输入：UTF-8 编码的“规范化 JSON”（无额外空白；不包含 `payload_hash` 字段本身）
 
 规范化步骤：
 
@@ -710,10 +718,11 @@ FR-031 规则族统一说明：`AUTO_PUNCH_ON_FULL_DAY_LEAVE` 与 `FULL_DAY_LEAV
    `user_id` / `device_id` / `writer_epoch` / `sync_id` / `punch_records` / `leave_records` / `day_summaries` / `month_summaries`
 2. 对象字段顺序按本契约定义顺序输出（不按客户端原始顺序）
 3. 数组排序按稳定业务键：  
-   `punch_records`/`leave_records` 按 `id`；`day_summaries` 按 `local_date`；`month_summaries` 按 `month_start`
-4. 时间字段统一为 UTC ISO8601 分钟粒度：`YYYY-MM-DDTHH:mm:00Z`
-5. 字段白名单：仅参与写入结果的字段参与哈希（不含 `trace_id`、`client_time` 等调试/本地元数据）
-6. 未知字段拒绝：请求出现白名单外字段，直接返回 `UNKNOWN_FIELD`，禁止“透传后忽略”
+   `punch_records`/`leave_records`：按 `id` 升序；`day_summaries`：按 `local_date` 升序，若同日再按 `id` 升序；`month_summaries`：按 `month_start` 升序，若同月再按 `id` 升序
+4. UUID 字段统一为小写（例如 `user_id/device_id/sync_id` 及各实体 `id`），避免大小写差异导致哈希不一致
+5. 时间字段统一为 UTC RFC3339（不含毫秒）；其中 `punch_records[].at_utc` 必须为分钟精度：`YYYY-MM-DDTHH:mm:00Z`
+6. 字段白名单：仅参与写入结果的字段参与哈希（不含 `trace_id`、`client_time` 等调试/本地元数据）
+7. 未知字段拒绝：请求出现白名单外字段，直接返回 `UNKNOWN_FIELD`，禁止“透传后忽略”
 
 一致性要求：
 
@@ -724,12 +733,11 @@ FR-031 规则族统一说明：`AUTO_PUNCH_ON_FULL_DAY_LEAVE` 与 `FULL_DAY_LEAV
 
 ## 附录 G：时间精度与一致性规则
 
-- API 入库前执行分钟向下取整（截断秒/毫秒）
-- 取整后校验：
+- `punch_records[].at_utc` 必须为分钟精度（秒/毫秒为 0），否则返回：`TIME_PRECISION_INVALID`
+- 同时校验：
   - `local_date == (at_utc AT TIME ZONE timezone_id)::date`
   - `minute_of_day == hour(at_utc@timezone_id) * 60 + minute(at_utc@timezone_id)`
 - 不一致时返回：`TIME_FIELDS_MISMATCH`
-- 非分钟粒度直写数据库会触发：`TIME_PRECISION_INVALID`
 
 ---
 

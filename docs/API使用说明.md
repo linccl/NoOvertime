@@ -18,8 +18,9 @@
 
 ## 1. 通用约定
 
-- 请求/响应默认 `Content-Type: application/json`。
-- 支持传入 `X-Request-ID`，若未传入服务端会自动生成。
+- 请求 Content-Type：`application/json`（建议显式设置）。
+- 响应 Content-Type：`application/json; charset=utf-8`。
+- 支持传入 `X-Request-ID`；若未传入服务端会自动生成，并在响应头回显。
 - 所有错误响应都包含以下结构：
 
 ```json
@@ -67,9 +68,9 @@ curl -i http://127.0.0.1:8080/health
 
 ## 3. 同步上报：`POST /api/v1/sync/commits`
 
-## 3.1 请求示例
+### 3.1 请求示例
 
-> `payload_hash` 必须是规范化请求体的 SHA-256（64 位小写十六进制）。
+> `payload_hash` 必须是规范化请求体（不含 `payload_hash` 字段本身）的 SHA-256（64 位小写十六进制）。
 
 ```bash
 curl -i -X POST 'http://127.0.0.1:8080/api/v1/sync/commits' \
@@ -88,7 +89,7 @@ curl -i -X POST 'http://127.0.0.1:8080/api/v1/sync/commits' \
   }'
 ```
 
-## 3.2 成功响应（写入生效）
+### 3.2 成功响应（写入生效）
 
 ```json
 {
@@ -103,7 +104,7 @@ curl -i -X POST 'http://127.0.0.1:8080/api/v1/sync/commits' \
 }
 ```
 
-## 3.3 NOOP 响应示例（幂等重放）
+### 3.3 NOOP 响应示例（幂等重放）
 
 ```json
 {
@@ -118,7 +119,7 @@ curl -i -X POST 'http://127.0.0.1:8080/api/v1/sync/commits' \
 }
 ```
 
-## 3.4 REJECTED 响应示例（冲突）
+### 3.4 REJECTED 响应示例（冲突）
 
 ```json
 {

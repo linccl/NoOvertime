@@ -1,5 +1,7 @@
 # P1-Batch2 实施计划：补齐配对码和恢复码路径
 
+> 状态：历史临时计划稿（仅留痕，可能与当前 `dispatch/` 批次编号不一致）；当前契约与错误码闭集以 `docs/核心写路径实现清单-T001.md` 与 `docs/API契约草案.md` 为准。
+
 ## 任务目标
 
 补齐配对码查询、配对码重置、恢复码生成、恢复码重置、Web 只读绑定创建、Web 只读绑定鉴权六个核心写路径接口。
@@ -8,7 +10,7 @@
 
 ## 任务背景
 
-当前后端已完成迁移相关的 3 个接口，但还缺少配对码和恢复码相关的 6 个接口：
+该计划编写时后端已完成迁移相关的 3 个接口，但还缺少配对码和恢复码相关的 6 个接口：
 
 1. POST /api/v1/pairing-code/query（配对码查询/首次生成）
 2. POST /api/v1/pairing-code/reset（配对码重置）
@@ -21,7 +23,7 @@
 
 ### 1. 路由注册
 
-在 server.go 中注册以下路由：
+在 `internal/api/server.go` 中注册以下路由：
 - POST /api/v1/pairing-code/query
 - POST /api/v1/pairing-code/reset
 - POST /api/v1/recovery-code/generate
@@ -64,6 +66,6 @@
 
 ## 参考文档
 
-- /Users/linshiyu/lincc/lincc-project/NoOvertime/docs/API契约草案.md
-- /Users/linshiyu/lincc/lincc-project/NoOvertime/docs/核心写路径实现清单-T001.md
-- /Users/linshiyu/lincc/lincc-project/NoOvertime/docs/需求文档.md
+- docs/API契约草案.md
+- docs/核心写路径实现清单-T001.md
+- docs/需求文档.md

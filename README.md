@@ -86,7 +86,7 @@ curl -i http://127.0.0.1:8080/health
 
 ### 同步上报
 
-> `payload_hash` 需为请求体规范化内容的 SHA-256（64 位小写十六进制）。
+> `payload_hash` 需为规范化请求体（不含 `payload_hash` 字段本身）的 SHA-256（64 位小写十六进制）。
 
 ```bash
 curl -i -X POST 'http://127.0.0.1:8080/api/v1/sync/commits' \
@@ -117,8 +117,8 @@ curl -i -X POST 'http://127.0.0.1:8080/api/v1/sync/commits' \
 
 - `APPLIED_WRITE`
 - `REPLAY_NOOP`
-- `LOW_OR_EQUAL_VERSION`
 - `SYNC_ID_CONFLICT`
+- `LOW_OR_EQUAL_VERSION`
 
 ## 常见错误码
 

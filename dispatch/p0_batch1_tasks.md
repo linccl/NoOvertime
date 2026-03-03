@@ -70,7 +70,7 @@
 
 **参考文档**：
 - docs/API契约草案.md - 错误码定义
-- docs/数据库方案草案.md - 数据库连接信息
+- docs/数据库链接信息.md - 数据库连接信息
 - db/migrations/001_init.sql - 数据库 schema
 
 ---
@@ -95,7 +95,7 @@
 3. 实现版本控制：
    - 检查 version 字段
    - 高版本覆盖低版本
-   - 低版本或同版本按 NOOP 处理
+   - 低版本或同版本按 NOOP 处理（HTTP 200 + gate_result=NOOP + gate_reason=LOW_OR_EQUAL_VERSION，不返回 error_code）
 
 4. 实现写入端校验：
    - 验证 device_id == users.writer_device_id
@@ -125,7 +125,6 @@
      - INVALID_ARGUMENT
      - UNKNOWN_FIELD
      - SYNC_ID_CONFLICT
-     - LOW_OR_EQUAL_VERSION_NOOP
      - PUNCH_END_REQUIRES_START
      - PUNCH_END_NOT_AFTER_START
      - CONFLICT_AUTO_PUNCH_FULL_DAY_LEAVE

@@ -1,5 +1,7 @@
 # P0-Batch1 实施计划：补齐核心写路径
 
+> 状态：历史临时计划稿（仅留痕，可能与当前 `dispatch/` 批次编号不一致）；当前契约与错误码闭集以 `docs/核心写路径实现清单-T001.md` 与 `docs/API契约草案.md` 为准。
+
 ## 任务目标
 
 补齐迁移申请、迁移确认、强制接管三个核心写路径接口。
@@ -8,7 +10,7 @@
 
 ## 任务背景
 
-当前后端只实现了 sync 路由（POST /api/v1/sync/commits），缺失了 API 契约中要求的其他核心写路径。需要补齐以下接口：
+该计划编写时后端只实现了 sync 路由（POST /api/v1/sync/commits），缺失了 API 契约中要求的其他核心写路径。需要补齐以下接口：
 
 1. POST /api/v1/migrations/requests（迁移申请）
 2. POST /api/v1/migrations/{migration_request_id}/confirm（迁移确认）
@@ -18,14 +20,14 @@
 
 ### 1. 路由注册
 
-在 server.go 中注册以下路由：
+在 `internal/api/server.go` 中注册以下路由：
 - POST /api/v1/migrations/requests
 - POST /api/v1/migrations/{migration_request_id}/confirm
 - POST /api/v1/migrations/forced-takeover
 
 ### 2. 错误码映射
 
-在 sync_commits.go 的 DB error_key -> API 错误码映射中补充：
+在 `internal/api/db_error_mapping.go` 的 DB error_key -> API 错误码映射中补充：
 - MIGRATION_SOURCE_MISMATCH
 - MIGRATION_TRANSITION_INVALID -> MIGRATION_STATE_INVALID
 - MIGRATION_IMMUTABLE_FIELDS
@@ -53,6 +55,6 @@
 
 ## 参考文档
 
-- /Users/linshiyu/lincc/lincc-project/NoOvertime/docs/API契约草案.md
-- /Users/linshiyu/lincc/lincc-project/NoOvertime/docs/核心写路径实现清单-T001.md
-- /Users/linshiyu/lincc/lincc-project/NoOvertime/docs/需求文档.md
+- docs/API契约草案.md
+- docs/核心写路径实现清单-T001.md
+- docs/需求文档.md

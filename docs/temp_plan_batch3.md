@@ -1,5 +1,7 @@
 # P1-Batch3 实施计划：修复验收门禁问题
 
+> 状态：历史临时计划稿（仅留痕）；当前门禁与 CI 口径以 `docs/回归门禁说明.md`、`Makefile` 与 `.github/workflows/regression.yml` 为准。
+
 ## 任务目标
 
 修复验收口径中的问题，确保 make gate 可用，CI 能够验证核心路径实现。
@@ -8,10 +10,10 @@
 
 ## 任务背景
 
-当前存在以下问题：
+该计划编写时存在以下问题：
 1. 验收口径里的 make gate 不存在（Makefile 中没有 gate 目标）
-2. CI 全绿目前不能证明 P0 完成（CI 只跑回归门禁，不覆盖后端核心路径实现测试）
-3. 当前环境下门禁未通过（回归脚本在连通性阶段报远端 5432 网络被拒绝）
+2. CI 全绿当时不能证明 P0 完成（CI 只跑回归门禁，不覆盖后端核心路径实现测试）
+3. 当时环境下门禁未通过（回归脚本在连通性阶段报远端 5432 网络被拒绝）
 
 ## 实现要求
 
@@ -46,7 +48,7 @@
 
 ## 参考文档
 
-- /Users/linshiyu/lincc/lincc-project/NoOvertime/Makefile
-- /Users/linshiyu/lincc/lincc-project/NoOvertime/.github/workflows/regression.yml
-- /Users/linshiyu/lincc/lincc-project/NoOvertime/docs/回归门禁说明.md
-- /Users/linshiyu/lincc/lincc-project/NoOvertime/docs/回归门禁口径与落地清单.md
+- Makefile
+- .github/workflows/regression.yml
+- docs/回归门禁说明.md
+- docs/回归门禁口径与落地清单.md
