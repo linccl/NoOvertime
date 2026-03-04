@@ -462,6 +462,63 @@ func TestSyncCommitsRouteVersionGateLowOrEqualNoopAndHighVersionApplied(t *testi
 	}
 }
 
+func TestSyncCommitsRouteVersionGateLowOrEqualNoopRejectsInvalidBusinessRules(t *testing.T) {
+	db := newFakeSyncCommitTxDB()
+	db.setWriter(testUserID, testDeviceID, testWriterEpoch)
+
+	now := time.Date(2026, 2, 13, 3, 0, 0, 0, time.UTC)
+	server := NewServer("127.0.0.1:0", db)
+	server.now = func() time.Time { return now }
+
+	appliedPayload := mustBuildPayloadWithComputedHash(t, func(req *syncCommitRequest) {
+		req.SyncID = "eb5166cb-13ed-47a0-9fb5-58e2062a3555"
+	})
+
+	applied := httptest.NewRecorder()
+	appliedReq := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(appliedPayload))
+	server.httpServer.Handler.ServeHTTP(applied, appliedReq)
+	if applied.Code != http.StatusOK {
+		t.Fatalf("applied status = %d body=%s", applied.Code, applied.Body.String())
+	}
+	if db.syncCommitCount() != 1 {
+		t.Fatalf("sync_commits count after applied = %d", db.syncCommitCount())
+	}
+	countsSnapshot := db.snapshotCounts()
+	businessSnapshot := db.snapshotBusinessVersions()
+
+	now = now.Add(15 * time.Minute)
+	badPayload := mustBuildPayloadWithComputedHash(t, func(req *syncCommitRequest) {
+		req.SyncID = "fb5166cb-13ed-47a0-9fb5-58e2062a3554"
+		req.PunchRecords[0].AtUTC = "2026-02-12T01:10:30Z"
+	})
+
+	bad := httptest.NewRecorder()
+	badReq := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(badPayload))
+	badReq.Header.Set(requestIDHeader, "req-low-version-time-precision")
+	server.httpServer.Handler.ServeHTTP(bad, badReq)
+	if bad.Code != http.StatusConflict {
+		t.Fatalf("bad status = %d body=%s", bad.Code, bad.Body.String())
+	}
+
+	var body apperrors.ErrorResponse
+	if err := json.Unmarshal(bad.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.ErrorCode != timePrecisionInvalid {
+		t.Fatalf("error_code = %q", body.ErrorCode)
+	}
+	if body.RequestID != "req-low-version-time-precision" {
+		t.Fatalf("request_id = %q", body.RequestID)
+	}
+
+	if diff := countsSnapshot.diff(db.snapshotCounts()); diff != "" {
+		t.Fatalf("LOW_OR_EQUAL_VERSION business rule violations must rollback writes, got diff: %s", diff)
+	}
+	if diff := businessSnapshot.diff(db.snapshotBusinessVersions()); diff != "" {
+		t.Fatalf("LOW_OR_EQUAL_VERSION business rule violations must not write business tables, got diff: %s", diff)
+	}
+}
+
 func TestSyncCommitsRouteRejectsPunchEndRequiresStart(t *testing.T) {
 	db := newFakeSyncCommitTxDB()
 	db.setWriter(testUserID, testDeviceID, testWriterEpoch)

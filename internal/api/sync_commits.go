@@ -247,6 +247,10 @@ func gateAndPersistSyncCommit(ctx context.Context, db HealthChecker, input SyncC
 			return nil
 		}
 
+		if err := validateSyncBusinessRules(input); err != nil {
+			return err
+		}
+
 		shouldApply, err := shouldApplySyncCommit(ctx, tx, input)
 		if err != nil {
 			return err
@@ -258,10 +262,6 @@ func gateAndPersistSyncCommit(ctx context.Context, db HealthChecker, input SyncC
 				Record: record,
 			}
 			return nil
-		}
-
-		if err := validateSyncBusinessRules(input); err != nil {
-			return err
 		}
 
 		exec := pgxSyncCommitTxExecutor{tx: tx}
