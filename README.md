@@ -43,7 +43,7 @@ export DATABASE_DSN='postgres://<user>:<password>@localhost:5432/no_overtime?ssl
 | 环境变量 | 必填 | 默认值 | 说明 |
 |---|---|---|---|
 | `DATABASE_DSN` | 是 | 无 | PostgreSQL 连接串 |
-| `HTTP_ADDR` | 否 | `:8080` | 服务监听地址，格式 `host:port` |
+| `HTTP_ADDR` | 否 | `:29082` | 服务监听地址，格式 `host:port` |
 | `LOG_LEVEL` | 否 | `info` | `debug/info/warn/error` |
 | `DB_POOL_MAX_CONNS` | 否 | `10` | 连接池最大连接数 |
 | `DB_POOL_MIN_CONNS` | 否 | `1` | 连接池最小连接数 |
@@ -61,14 +61,14 @@ go run ./cmd/api
 
 启动后访问：
 
-- `http://127.0.0.1:8080/web/`
+- `http://127.0.0.1:29082/web/`
 
 ## 接口快速示例
 
 ### 健康检查
 
 ```bash
-curl -i http://127.0.0.1:8080/health
+curl -i http://127.0.0.1:29082/health
 ```
 
 成功示例（HTTP 200）：
@@ -89,7 +89,7 @@ curl -i http://127.0.0.1:8080/health
 > `payload_hash` 需为规范化请求体（不含 `payload_hash` 字段本身）的 SHA-256（64 位小写十六进制）。
 
 ```bash
-curl -i -X POST 'http://127.0.0.1:8080/api/v1/sync/commits' \
+curl -i -X POST 'http://127.0.0.1:29082/api/v1/sync/commits' \
   -H 'Content-Type: application/json' \
   -H 'X-Request-ID: req-sync-demo-001' \
   -d '{

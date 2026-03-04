@@ -36,7 +36,7 @@
 ### 请求
 
 ```bash
-curl -i http://127.0.0.1:8080/health
+curl -i http://127.0.0.1:29082/health
 ```
 
 ### 成功响应（HTTP 200）
@@ -73,7 +73,7 @@ curl -i http://127.0.0.1:8080/health
 > `payload_hash` 必须是规范化请求体（不含 `payload_hash` 字段本身）的 SHA-256（64 位小写十六进制）。
 
 ```bash
-curl -i -X POST 'http://127.0.0.1:8080/api/v1/sync/commits' \
+curl -i -X POST 'http://127.0.0.1:29082/api/v1/sync/commits' \
   -H 'Content-Type: application/json' \
   -H 'X-Request-ID: req-sync-001' \
   -d '{

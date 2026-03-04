@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	defaultHTTPAddr             = ":8080"
+	defaultHTTPAddr             = ":29082"
 	defaultLogLevel             = "info"
 	defaultDBPoolMaxConns       = 10
 	defaultDBPoolMinConns       = 1

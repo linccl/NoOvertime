@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-http://127.0.0.1:8080}"
+BASE_URL="${BASE_URL:-http://127.0.0.1:29082}"
 PAIRING_CODE="${PAIRING_CODE:-}"
 CLIENT_FINGERPRINT="${CLIENT_FINGERPRINT:-}"
 WEB_DEVICE_NAME="${WEB_DEVICE_NAME:-Chrome@Local}"
@@ -14,7 +14,7 @@ usage() {
 Web dashboard smoke (bind -> auth -> month/day summaries)
 
 Usage:
-  BASE_URL=http://127.0.0.1:8080 \
+  BASE_URL=http://127.0.0.1:29082 \
   PAIRING_CODE=12345678 \
   CLIENT_FINGERPRINT=9cfce7bcd5d6dfac2697fdf1f5b9f226 \
   YEAR=2026 \
@@ -130,4 +130,3 @@ main() {
 }
 
 main "$@"
-
