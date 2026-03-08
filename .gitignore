@@ -3,3 +3,4 @@ AGENTS.md
 **/.DS_Store
 .claude/
 .gocache/
+.swarm/runtime/
