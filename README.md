@@ -105,7 +105,7 @@ curl -i -X POST 'http://127.0.0.1:29082/api/v1/sync/commits' \
   }'
 ```
 
-更多接口语义、错误码与 gate 字段说明见：`docs/API使用说明.md`。
+更多接口语义、错误码与 gate 字段说明见：`docs/API使用说明.md`。若要查看安卓端最新 token-only 改造对 API 端的输入，请优先阅读 `docs/安卓端TokenOnly改造对API端总览.md`。
 
 ## gate 字段语义
 
