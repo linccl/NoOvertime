@@ -18,9 +18,6 @@ import (
 )
 
 const validSyncCommitPayload = `{
-  "user_id": "8d3c4d78-6c2b-4b56-a430-1e6b97f5b362",
-  "device_id": "0b854f80-0213-4cb1-b5d0-95af02f137f3",
-  "writer_epoch": 12,
   "sync_id": "bb5166cb-13ed-47a0-9fb5-58e2062a3559",
   "payload_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "punch_records": [
@@ -74,10 +71,16 @@ const validSyncCommitPayload = `{
 }`
 
 const (
-	testUserID      = "8d3c4d78-6c2b-4b56-a430-1e6b97f5b362"
-	testDeviceID    = "0b854f80-0213-4cb1-b5d0-95af02f137f3"
-	testWriterEpoch = int64(12)
+	testUserID             = "8d3c4d78-6c2b-4b56-a430-1e6b97f5b362"
+	testDeviceID           = "0b854f80-0213-4cb1-b5d0-95af02f137f3"
+	testWriterEpoch        = int64(12)
+	testSyncToken          = "tok_sync_bound"
+	testAnonymousSyncToken = "tok_sync_anon"
 )
+
+func setSyncAuthHeader(req *http.Request, token string) {
+	req.Header.Set(authorizationHeader, "Bearer "+token)
+}
 
 func TestGeneratePayloadHashStableAcrossArrayOrder(t *testing.T) {
 	request := mustBuildSyncCommitRequest(t, nil)
@@ -116,11 +119,8 @@ func TestParseSyncCommitInputSuccess(t *testing.T) {
 		t.Fatalf("parseSyncCommitInput() error = %v", err)
 	}
 
-	if input.UserID != "8d3c4d78-6c2b-4b56-a430-1e6b97f5b362" {
-		t.Fatalf("user_id = %q", input.UserID)
-	}
-	if input.WriterEpoch != 12 {
-		t.Fatalf("writer_epoch = %d", input.WriterEpoch)
+	if input.SyncID != "bb5166cb-13ed-47a0-9fb5-58e2062a3559" {
+		t.Fatalf("sync_id = %q", input.SyncID)
 	}
 	if input.ComputedPayloadHash == "" {
 		t.Fatal("computed payload hash is empty")
@@ -132,7 +132,7 @@ func TestParseSyncCommitInputSuccess(t *testing.T) {
 
 func TestParseSyncCommitInputUnknownField(t *testing.T) {
 	payload := mustBuildPayloadWithComputedHash(t, nil)
-	payload = strings.Replace(payload, `{"user_id":`, `{"unknown_field":"x","user_id":`, 1)
+	payload = strings.Replace(payload, `{"sync_id":`, `{"unknown_field":"x","sync_id":`, 1)
 
 	_, err := parseSyncCommitInput(strings.NewReader(payload))
 	if err == nil {
@@ -150,7 +150,7 @@ func TestParseSyncCommitInputUnknownField(t *testing.T) {
 
 func TestParseSyncCommitInputInvalidArgument(t *testing.T) {
 	payload := mustBuildPayloadWithComputedHash(t, nil)
-	payload = strings.Replace(payload, `"writer_epoch":12`, `"writer_epoch":0`, 1)
+	payload = strings.Replace(payload, `"sync_id":"bb5166cb-13ed-47a0-9fb5-58e2062a3559"`, `"sync_id":"invalid-sync-id"`, 1)
 
 	_, err := parseSyncCommitInput(strings.NewReader(payload))
 	if err == nil {
@@ -197,6 +197,44 @@ func TestParseSyncCommitInputPayloadHashMismatch(t *testing.T) {
 	}
 }
 
+func TestSyncCommitsRouteFirstSuccessfulSyncBindsUserID(t *testing.T) {
+	db := newFakeSyncCommitTxDB()
+	db.seedMobileToken(testAnonymousSyncToken, "", testDeviceID, 1, mobileTokenStateActive)
+
+	restoreUUID := stubInternalUUIDGenerator(t, testUserID)
+	defer restoreUUID()
+
+	now := time.Date(2026, 2, 13, 2, 0, 0, 0, time.UTC)
+	server := NewServer("127.0.0.1:0", db)
+	server.now = func() time.Time { return now }
+	requestPayload := mustBuildPayloadWithComputedHash(t, nil)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(requestPayload))
+	setSyncAuthHeader(req, testAnonymousSyncToken)
+	req.Header.Set(requestIDHeader, "req-sync-first-bind")
+	server.httpServer.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var body syncCommitResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.UserID != testUserID {
+		t.Fatalf("user_id = %q", body.UserID)
+	}
+	if body.GateResult != gateResultApplied || body.GateReason != gateReasonAppliedWrite {
+		t.Fatalf("gate = %s/%s", body.GateResult, body.GateReason)
+	}
+	record := db.mobileTokenRecord(testAnonymousSyncToken)
+	if record.UserID != testUserID {
+		t.Fatalf("bound token user_id = %q", record.UserID)
+	}
+}
+
 func TestSyncCommitsRouteAppliedAndReplayNoop(t *testing.T) {
 	db := newFakeSyncCommitTxDB()
 	db.setWriter(testUserID, testDeviceID, testWriterEpoch)
@@ -208,6 +246,7 @@ func TestSyncCommitsRouteAppliedAndReplayNoop(t *testing.T) {
 
 	first := httptest.NewRecorder()
 	firstReq := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(requestPayload))
+	setSyncAuthHeader(firstReq, testSyncToken)
 	firstReq.Header.Set(requestIDHeader, "req-sync-apply")
 	server.httpServer.Handler.ServeHTTP(first, firstReq)
 
@@ -222,6 +261,9 @@ func TestSyncCommitsRouteAppliedAndReplayNoop(t *testing.T) {
 	if firstBody.GateResult != gateResultApplied || firstBody.GateReason != gateReasonAppliedWrite {
 		t.Fatalf("first gate = %s/%s", firstBody.GateResult, firstBody.GateReason)
 	}
+	if firstBody.UserID != testUserID {
+		t.Fatalf("first user_id = %q", firstBody.UserID)
+	}
 	firstCreatedAt := firstBody.SyncCommit.CreatedAt
 	if db.syncCommitCount() != 1 {
 		t.Fatalf("sync_commits count = %d", db.syncCommitCount())
@@ -235,6 +277,7 @@ func TestSyncCommitsRouteAppliedAndReplayNoop(t *testing.T) {
 
 	second := httptest.NewRecorder()
 	secondReq := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(requestPayload))
+	setSyncAuthHeader(secondReq, testSyncToken)
 	secondReq.Header.Set(requestIDHeader, "req-sync-replay")
 	restart.httpServer.Handler.ServeHTTP(second, secondReq)
 
@@ -248,6 +291,9 @@ func TestSyncCommitsRouteAppliedAndReplayNoop(t *testing.T) {
 	}
 	if secondBody.GateResult != gateResultNoop || secondBody.GateReason != gateReasonReplayNoop {
 		t.Fatalf("second gate = %s/%s", secondBody.GateResult, secondBody.GateReason)
+	}
+	if secondBody.UserID != testUserID {
+		t.Fatalf("second user_id = %q", secondBody.UserID)
 	}
 	if secondBody.SyncCommit.CreatedAt != firstCreatedAt {
 		t.Fatalf("created_at mismatch first=%q second=%q", firstCreatedAt, secondBody.SyncCommit.CreatedAt)
@@ -277,6 +323,7 @@ func TestSyncCommitsRouteConflictOnSameSyncIDDifferentHash(t *testing.T) {
 
 	first := httptest.NewRecorder()
 	firstReq := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(firstPayload))
+	setSyncAuthHeader(firstReq, testSyncToken)
 	firstReq.Header.Set(requestIDHeader, "req-sync-first")
 	server.httpServer.Handler.ServeHTTP(first, firstReq)
 
@@ -287,6 +334,7 @@ func TestSyncCommitsRouteConflictOnSameSyncIDDifferentHash(t *testing.T) {
 
 	second := httptest.NewRecorder()
 	secondReq := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(secondPayload))
+	setSyncAuthHeader(secondReq, testSyncToken)
 	secondReq.Header.Set(requestIDHeader, "req-sync-conflict")
 	server.httpServer.Handler.ServeHTTP(second, secondReq)
 
@@ -314,14 +362,13 @@ func TestSyncCommitsRouteConflictOnSameSyncIDDifferentHash(t *testing.T) {
 
 func TestSyncCommitsRouteStaleWriterRejectedByDeviceID(t *testing.T) {
 	db := newFakeSyncCommitTxDB()
-	db.setWriter(testUserID, testDeviceID, testWriterEpoch)
+	db.setWriter(testUserID, "9b854f80-0213-4cb1-b5d0-95af02f137f9", testWriterEpoch)
 
 	server := NewServer("127.0.0.1:0", db)
 	server.now = func() time.Time { return time.Date(2026, 2, 13, 3, 0, 0, 0, time.UTC) }
 
 	secondPayload := mustBuildPayloadWithComputedHash(t, func(req *syncCommitRequest) {
 		req.SyncID = "ab5166cb-13ed-47a0-9fb5-58e2062a3558"
-		req.DeviceID = "9b854f80-0213-4cb1-b5d0-95af02f137f9"
 		req.PunchRecords[0].Version = 6
 		req.DaySummaries[0].Version = 6
 		req.MonthSummaries[0].Version = 6
@@ -330,6 +377,7 @@ func TestSyncCommitsRouteStaleWriterRejectedByDeviceID(t *testing.T) {
 
 	second := httptest.NewRecorder()
 	secondReq := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(secondPayload))
+	setSyncAuthHeader(secondReq, testSyncToken)
 	secondReq.Header.Set(requestIDHeader, "req-stale-device")
 	server.httpServer.Handler.ServeHTTP(second, secondReq)
 
@@ -354,14 +402,13 @@ func TestSyncCommitsRouteStaleWriterRejectedByDeviceID(t *testing.T) {
 
 func TestSyncCommitsRouteStaleWriterRejectedByEpoch(t *testing.T) {
 	db := newFakeSyncCommitTxDB()
-	db.setWriter(testUserID, testDeviceID, testWriterEpoch)
+	db.setWriter(testUserID, testDeviceID, 13)
 
 	server := NewServer("127.0.0.1:0", db)
 	server.now = func() time.Time { return time.Date(2026, 2, 13, 3, 0, 0, 0, time.UTC) }
 
 	secondPayload := mustBuildPayloadWithComputedHash(t, func(req *syncCommitRequest) {
 		req.SyncID = "db5166cb-13ed-47a0-9fb5-58e2062a3556"
-		req.WriterEpoch = 13
 		req.PunchRecords[0].Version = 7
 		req.DaySummaries[0].Version = 7
 		req.MonthSummaries[0].Version = 7
@@ -370,6 +417,7 @@ func TestSyncCommitsRouteStaleWriterRejectedByEpoch(t *testing.T) {
 
 	second := httptest.NewRecorder()
 	secondReq := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(secondPayload))
+	setSyncAuthHeader(secondReq, testSyncToken)
 	secondReq.Header.Set(requestIDHeader, "req-stale-epoch")
 	server.httpServer.Handler.ServeHTTP(second, secondReq)
 
@@ -416,6 +464,7 @@ func TestSyncCommitsRouteVersionGateLowOrEqualNoopAndHighVersionApplied(t *testi
 
 	first := httptest.NewRecorder()
 	firstReq := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(firstPayload))
+	setSyncAuthHeader(firstReq, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(first, firstReq)
 	if first.Code != http.StatusOK {
 		t.Fatalf("first status = %d body=%s", first.Code, first.Body.String())
@@ -428,6 +477,7 @@ func TestSyncCommitsRouteVersionGateLowOrEqualNoopAndHighVersionApplied(t *testi
 	now = now.Add(15 * time.Minute)
 	low := httptest.NewRecorder()
 	lowReq := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(lowPayload))
+	setSyncAuthHeader(lowReq, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(low, lowReq)
 	if low.Code != http.StatusOK {
 		t.Fatalf("low status = %d body=%s", low.Code, low.Body.String())
@@ -449,6 +499,7 @@ func TestSyncCommitsRouteVersionGateLowOrEqualNoopAndHighVersionApplied(t *testi
 	now = now.Add(15 * time.Minute)
 	high := httptest.NewRecorder()
 	highReq := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(highPayload))
+	setSyncAuthHeader(highReq, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(high, highReq)
 	if high.Code != http.StatusOK {
 		t.Fatalf("high status = %d body=%s", high.Code, high.Body.String())
@@ -476,6 +527,7 @@ func TestSyncCommitsRouteVersionGateLowOrEqualNoopRejectsInvalidBusinessRules(t 
 
 	applied := httptest.NewRecorder()
 	appliedReq := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(appliedPayload))
+	setSyncAuthHeader(appliedReq, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(applied, appliedReq)
 	if applied.Code != http.StatusOK {
 		t.Fatalf("applied status = %d body=%s", applied.Code, applied.Body.String())
@@ -494,6 +546,7 @@ func TestSyncCommitsRouteVersionGateLowOrEqualNoopRejectsInvalidBusinessRules(t 
 
 	bad := httptest.NewRecorder()
 	badReq := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(badPayload))
+	setSyncAuthHeader(badReq, testSyncToken)
 	badReq.Header.Set(requestIDHeader, "req-low-version-time-precision")
 	server.httpServer.Handler.ServeHTTP(bad, badReq)
 	if bad.Code != http.StatusConflict {
@@ -533,6 +586,7 @@ func TestSyncCommitsRouteRejectsPunchEndRequiresStart(t *testing.T) {
 
 	bad := httptest.NewRecorder()
 	badReq := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(badPayload))
+	setSyncAuthHeader(badReq, testSyncToken)
 	badReq.Header.Set(requestIDHeader, "req-rule-end-requires-start")
 	server.httpServer.Handler.ServeHTTP(bad, badReq)
 
@@ -558,6 +612,7 @@ func TestSyncCommitsRouteRejectsPunchEndRequiresStart(t *testing.T) {
 
 	good := httptest.NewRecorder()
 	goodReq := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(goodPayload))
+	setSyncAuthHeader(goodReq, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(good, goodReq)
 
 	if good.Code != http.StatusOK {
@@ -589,6 +644,7 @@ func TestSyncCommitsRouteRejectsPunchEndNotAfterStart(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(payload))
+	setSyncAuthHeader(req, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusConflict {
@@ -623,6 +679,7 @@ func TestSyncCommitsRouteRejectsFullDayLeaveWithAutoPunch(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(payload))
+	setSyncAuthHeader(req, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusConflict {
@@ -655,6 +712,7 @@ func TestSyncCommitsRouteRejectsTimePrecisionInvalid(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(payload))
+	setSyncAuthHeader(req, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusConflict {
@@ -687,6 +745,7 @@ func TestSyncCommitsRouteRejectsTimeFieldsMismatch(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(payload))
+	setSyncAuthHeader(req, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusConflict {
@@ -757,6 +816,7 @@ func TestSyncCommitResultCreatedAtRFC3339(t *testing.T) {
 	requestPayload := mustBuildPayloadWithComputedHash(t, nil)
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(requestPayload))
+	setSyncAuthHeader(request, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
@@ -870,6 +930,7 @@ func TestSyncCommitsRouteTransactionFailureRollsBackGateState(t *testing.T) {
 
 	first := httptest.NewRecorder()
 	firstReq := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(payload))
+	setSyncAuthHeader(firstReq, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(first, firstReq)
 	if first.Code != http.StatusInternalServerError {
 		t.Fatalf("first status = %d body=%s", first.Code, first.Body.String())
@@ -885,6 +946,7 @@ func TestSyncCommitsRouteTransactionFailureRollsBackGateState(t *testing.T) {
 
 	second := httptest.NewRecorder()
 	secondReq := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(payload))
+	setSyncAuthHeader(secondReq, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(second, secondReq)
 	if second.Code != http.StatusOK {
 		t.Fatalf("second status = %d body=%s", second.Code, second.Body.String())
@@ -1053,6 +1115,7 @@ func TestSyncCommitsRouteMapsDBUniqueConflictToRejectedGate(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(payload))
+	setSyncAuthHeader(req, testSyncToken)
 	req.Header.Set(requestIDHeader, "req-db-conflict")
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
@@ -1088,6 +1151,7 @@ func TestSyncCommitsRouteMapsDBErrorKeyToAPIErrorWithRequestID(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(payload))
+	setSyncAuthHeader(req, testSyncToken)
 	req.Header.Set(requestIDHeader, "req-db-error-key")
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
@@ -1150,14 +1214,16 @@ type fakeSyncCommitTxDB struct {
 	committedTableCounts map[string]int
 	lastTx               *fakeSyncCommitTx
 	writer               map[string]fakeSyncCommitWriterState
+	mobileTokens         map[string]fakeMobileTokenRecord
 	syncCommits          map[fakeSyncCommitKey]syncCommitGateRecord
 	businessVersions     map[string]map[fakeBusinessKey]int64
 }
 
 func newFakeSyncCommitTxDB() *fakeSyncCommitTxDB {
-	return &fakeSyncCommitTxDB{
+	db := &fakeSyncCommitTxDB{
 		committedTableCounts: make(map[string]int),
 		writer:               make(map[string]fakeSyncCommitWriterState),
+		mobileTokens:         make(map[string]fakeMobileTokenRecord),
 		syncCommits:          make(map[fakeSyncCommitKey]syncCommitGateRecord),
 		businessVersions: map[string]map[fakeBusinessKey]int64{
 			"punch_records":   {},
@@ -1166,6 +1232,8 @@ func newFakeSyncCommitTxDB() *fakeSyncCommitTxDB {
 			"month_summaries": {},
 		},
 	}
+	db.seedMobileToken(testSyncToken, testUserID, testDeviceID, testWriterEpoch, mobileTokenStateActive)
+	return db
 }
 
 func (f *fakeSyncCommitTxDB) Health(context.Context) error {
@@ -1174,6 +1242,23 @@ func (f *fakeSyncCommitTxDB) Health(context.Context) error {
 
 func (f *fakeSyncCommitTxDB) setWriter(userID, deviceID string, epoch int64) {
 	f.writer[userID] = fakeSyncCommitWriterState{deviceID: deviceID, epoch: epoch}
+}
+
+func (f *fakeSyncCommitTxDB) seedMobileToken(token, userID, deviceID string, writerEpoch int64, status string) {
+	f.mobileTokens[hashMobileToken(token)] = fakeMobileTokenRecord{
+		UserID:      userID,
+		DeviceID:    deviceID,
+		WriterEpoch: writerEpoch,
+		Status:      status,
+	}
+}
+
+func (f *fakeSyncCommitTxDB) mobileTokenRecord(token string) fakeMobileTokenRecord {
+	record, ok := f.mobileTokens[hashMobileToken(token)]
+	if !ok {
+		panic(fmt.Sprintf("token not found: %s", token))
+	}
+	return record
 }
 
 func (f *fakeSyncCommitTxDB) syncCommitCount() int {
@@ -1206,6 +1291,8 @@ func (f *fakeSyncCommitTxDB) WithTx(ctx context.Context, fn func(tx pgx.Tx) erro
 		id:               fmt.Sprintf("tx-%d", f.withTxCalls),
 		failTable:        f.failTable,
 		failErr:          f.failErr,
+		writer:           cloneWriterStates(f.writer),
+		mobileTokens:     cloneFakeMobileTokenRecords(f.mobileTokens),
 		syncCommits:      cloneSyncCommitMap(f.syncCommits),
 		businessVersions: cloneBusinessVersions(f.businessVersions),
 	}
@@ -1216,6 +1303,8 @@ func (f *fakeSyncCommitTxDB) WithTx(ctx context.Context, fn func(tx pgx.Tx) erro
 		return err
 	}
 
+	f.writer = tx.writer
+	f.mobileTokens = tx.mobileTokens
 	f.syncCommits = tx.syncCommits
 	f.businessVersions = tx.businessVersions
 	f.commits++
@@ -1233,6 +1322,8 @@ type fakeSyncCommitTx struct {
 	execCalls        int
 	tables           []string
 	txIDs            []string
+	writer           map[string]fakeSyncCommitWriterState
+	mobileTokens     map[string]fakeMobileTokenRecord
 	syncCommits      map[fakeSyncCommitKey]syncCommitGateRecord
 	businessVersions map[string]map[fakeBusinessKey]int64
 }
@@ -1263,15 +1354,50 @@ func (f *fakeSyncCommitTx) Exec(_ context.Context, query string, args ...any) (p
 	f.execCalls++
 	f.tables = append(f.tables, table)
 	f.txIDs = append(f.txIDs, f.id)
-	switch table {
-	case "sync_commits":
+
+	switch {
+	case strings.Contains(query, "INSERT INTO sync_commits"):
 		if err := f.execInsertSyncCommit(args); err != nil {
 			return pgconn.CommandTag{}, err
 		}
-	case "punch_records", "leave_records", "day_summaries", "month_summaries":
-		if err := f.execUpsertBusiness(table, args); err != nil {
+	case strings.Contains(query, "INSERT INTO punch_records"):
+		if err := f.execUpsertBusiness("punch_records", args); err != nil {
 			return pgconn.CommandTag{}, err
 		}
+	case strings.Contains(query, "INSERT INTO leave_records"):
+		if err := f.execUpsertBusiness("leave_records", args); err != nil {
+			return pgconn.CommandTag{}, err
+		}
+	case strings.Contains(query, "INSERT INTO day_summaries"):
+		if err := f.execUpsertBusiness("day_summaries", args); err != nil {
+			return pgconn.CommandTag{}, err
+		}
+	case strings.Contains(query, "INSERT INTO month_summaries"):
+		if err := f.execUpsertBusiness("month_summaries", args); err != nil {
+			return pgconn.CommandTag{}, err
+		}
+	case strings.Contains(query, "INSERT INTO users"):
+		if err := f.execInsertUser(args); err != nil {
+			return pgconn.CommandTag{}, err
+		}
+	case strings.Contains(query, "INSERT INTO devices"):
+		if err := f.execEnsureDevice(args); err != nil {
+			return pgconn.CommandTag{}, err
+		}
+	case strings.Contains(query, "UPDATE users"):
+		if err := f.execSetUserWriter(args); err != nil {
+			return pgconn.CommandTag{}, err
+		}
+	case strings.Contains(query, "UPDATE mobile_tokens") && strings.Contains(query, "WHERE token_hash = $1"):
+		if err := f.execBindTokenUser(args); err != nil {
+			return pgconn.CommandTag{}, err
+		}
+	case strings.Contains(query, "UPDATE mobile_tokens") && strings.Contains(query, "WHERE device_id = $1::uuid"):
+		if err := f.execBindTokensByDevice(args); err != nil {
+			return pgconn.CommandTag{}, err
+		}
+	default:
+		return pgconn.CommandTag{}, fmt.Errorf("unsupported exec query: %s", query)
 	}
 	return pgconn.CommandTag{}, nil
 }
@@ -1293,6 +1419,8 @@ func (f *fakeSyncCommitTx) QueryRow(_ context.Context, query string, args ...any
 		return f.queryRowLoadSyncCommit(args)
 	case strings.Contains(query, "SELECT version FROM"):
 		return f.queryRowSelectVersion(table, args)
+	case strings.Contains(query, "FROM mobile_tokens"):
+		return f.queryRowLoadMobileToken(args)
 	default:
 		return fakeRow{err: fmt.Errorf("unsupported query: %s", query)}
 	}
@@ -1311,6 +1439,14 @@ func detectTable(query string) string {
 		return "month_summaries"
 	case strings.Contains(query, "INSERT INTO sync_commits"):
 		return "sync_commits"
+	case strings.Contains(query, "INSERT INTO users"):
+		return "users"
+	case strings.Contains(query, "INSERT INTO devices"):
+		return "devices"
+	case strings.Contains(query, "UPDATE users"):
+		return "users"
+	case strings.Contains(query, "UPDATE mobile_tokens"):
+		return "mobile_tokens"
 	case strings.Contains(query, "FROM punch_records"):
 		return "punch_records"
 	case strings.Contains(query, "FROM leave_records"):
@@ -1321,6 +1457,8 @@ func detectTable(query string) string {
 		return "month_summaries"
 	case strings.Contains(query, "FROM sync_commits"):
 		return "sync_commits"
+	case strings.Contains(query, "FROM mobile_tokens"):
+		return "mobile_tokens"
 	default:
 		return "unknown"
 	}
@@ -1353,28 +1491,9 @@ func (f fakeRow) Scan(dest ...any) error {
 	if len(dest) != len(f.values) {
 		return fmt.Errorf("fake row scan mismatch dest=%d values=%d", len(dest), len(f.values))
 	}
-	for i, value := range f.values {
-		switch target := dest[i].(type) {
-		case *string:
-			cast, ok := value.(string)
-			if !ok {
-				return fmt.Errorf("fake row expected string at %d, got %T", i, value)
-			}
-			*target = cast
-		case *time.Time:
-			cast, ok := value.(time.Time)
-			if !ok {
-				return fmt.Errorf("fake row expected time at %d, got %T", i, value)
-			}
-			*target = cast
-		case *int64:
-			cast, ok := value.(int64)
-			if !ok {
-				return fmt.Errorf("fake row expected int64 at %d, got %T", i, value)
-			}
-			*target = cast
-		default:
-			return fmt.Errorf("fake row unsupported scan target %T", dest[i])
+	for i := range dest {
+		if err := assignScanValue(dest[i], f.values[i]); err != nil {
+			return fmt.Errorf("scan[%d]: %w", i, err)
 		}
 	}
 	return nil
@@ -1392,7 +1511,7 @@ func (f *fakeSyncCommitTx) queryRowInsertSyncCommitReturning(args []any) pgx.Row
 	status, _ := args[5].(string)
 	createdAt, _ := args[6].(time.Time)
 
-	if state, ok := f.db.writer[userID]; ok {
+	if state, ok := f.writer[userID]; ok {
 		if state.deviceID != deviceID || state.epoch != writerEpoch {
 			return fakeRow{err: &pgconn.PgError{Code: "P0001", Message: "[error_key=SYNC_COMMIT_STALE_WRITER] stale writer"}}
 		}
@@ -1438,6 +1557,24 @@ func (f *fakeSyncCommitTx) queryRowSelectVersion(table string, args []any) pgx.R
 		return fakeRow{err: pgx.ErrNoRows}
 	}
 	return fakeRow{values: []any{version}}
+}
+
+func (f *fakeSyncCommitTx) queryRowLoadMobileToken(args []any) pgx.Row {
+	if len(args) < 1 {
+		return fakeRow{err: fmt.Errorf("expected mobile token select args, got %d", len(args))}
+	}
+	tokenHash, _ := args[0].(string)
+	record, ok := f.mobileTokens[tokenHash]
+	if !ok {
+		return fakeRow{err: pgx.ErrNoRows}
+	}
+	return fakeRow{values: []any{
+		record.UserID,
+		record.DeviceID,
+		record.WriterEpoch,
+		record.Status,
+		record.FingerprintHash,
+	}}
 }
 
 func (f *fakeSyncCommitTx) execInsertSyncCommit(args []any) error {
@@ -1493,6 +1630,76 @@ func (f *fakeSyncCommitTx) execUpsertBusiness(table string, args []any) error {
 	}
 	if incomingVersion > existingVersion {
 		f.businessVersions[table][key] = incomingVersion
+	}
+	return nil
+}
+
+func (f *fakeSyncCommitTx) execInsertUser(args []any) error {
+	if len(args) < 3 {
+		return fmt.Errorf("expected users insert args, got %d", len(args))
+	}
+	userID, _ := args[0].(string)
+	writerEpoch, _ := args[2].(int64)
+	state := f.writer[userID]
+	state.epoch = writerEpoch
+	f.writer[userID] = state
+	return nil
+}
+
+func (f *fakeSyncCommitTx) execEnsureDevice(args []any) error {
+	if len(args) < 2 {
+		return fmt.Errorf("expected devices insert args, got %d", len(args))
+	}
+	deviceID, _ := args[0].(string)
+	userID, _ := args[1].(string)
+	state := f.writer[userID]
+	if state.deviceID == "" {
+		state.deviceID = deviceID
+	}
+	f.writer[userID] = state
+	return nil
+}
+
+func (f *fakeSyncCommitTx) execSetUserWriter(args []any) error {
+	if len(args) < 3 {
+		return fmt.Errorf("expected users update args, got %d", len(args))
+	}
+	userID, _ := args[0].(string)
+	deviceID, _ := args[1].(string)
+	writerEpoch, _ := args[2].(int64)
+	f.writer[userID] = fakeSyncCommitWriterState{deviceID: deviceID, epoch: writerEpoch}
+	return nil
+}
+
+func (f *fakeSyncCommitTx) execBindTokenUser(args []any) error {
+	if len(args) < 2 {
+		return fmt.Errorf("expected mobile token bind args, got %d", len(args))
+	}
+	tokenHash, _ := args[0].(string)
+	userID, _ := args[1].(string)
+	record, ok := f.mobileTokens[tokenHash]
+	if !ok {
+		return nil
+	}
+	record.UserID = userID
+	f.mobileTokens[tokenHash] = record
+	return nil
+}
+
+func (f *fakeSyncCommitTx) execBindTokensByDevice(args []any) error {
+	if len(args) < 3 {
+		return fmt.Errorf("expected mobile token device bind args, got %d", len(args))
+	}
+	deviceID, _ := args[0].(string)
+	userID, _ := args[1].(string)
+	writerEpoch, _ := args[2].(int64)
+	for tokenHash, record := range f.mobileTokens {
+		if record.DeviceID != deviceID || record.Status != mobileTokenStateActive {
+			continue
+		}
+		record.UserID = userID
+		record.WriterEpoch = writerEpoch
+		f.mobileTokens[tokenHash] = record
 	}
 	return nil
 }
@@ -1586,6 +1793,14 @@ func cloneSyncCommitMap(src map[fakeSyncCommitKey]syncCommitGateRecord) map[fake
 	dst := make(map[fakeSyncCommitKey]syncCommitGateRecord, len(src))
 	for key, record := range src {
 		dst[key] = record
+	}
+	return dst
+}
+
+func cloneWriterStates(src map[string]fakeSyncCommitWriterState) map[string]fakeSyncCommitWriterState {
+	dst := make(map[string]fakeSyncCommitWriterState, len(src))
+	for key, value := range src {
+		dst[key] = value
 	}
 	return dst
 }

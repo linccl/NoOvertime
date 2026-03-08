@@ -20,6 +20,11 @@ const validMigrationForcedTakeoverBody = `{
 	"to_device_id":"f2df11ef-7240-42b2-8ceb-623ad7711e0c"
 }`
 
+const validMigrationTakeoverTokenOnlyBody = `{
+	"pairing_code":"39481726",
+	"recovery_code":"AB12CD34EF56GH78"
+}`
+
 func TestMigrationForcedTakeoverRouteSuccess(t *testing.T) {
 	db := &fakeMigrationForcedTakeoverDB{
 		userSnapshot: fakeForcedTakeoverUserSnapshot{
@@ -30,12 +35,14 @@ func TestMigrationForcedTakeoverRouteSuccess(t *testing.T) {
 		migrationRequestID: "ac5af84e-c497-4344-8994-9fef4ec54ab0",
 		writerEpoch:        14,
 		completedAt:        time.Date(2026, 2, 13, 15, 0, 0, 0, time.UTC),
+		mobileTokens:       newMigrationTestMobileTokens(),
 	}
 	server := NewServer("127.0.0.1:0", db)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, migrationsForcedTakeoverPath, strings.NewReader(validMigrationForcedTakeoverBody))
 	req.Header.Set(requestIDHeader, "req-forced-success")
+	setSyncAuthHeader(req, testTargetDeviceToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -64,6 +71,58 @@ func TestMigrationForcedTakeoverRouteSuccess(t *testing.T) {
 	if body.CompletedAt != "2026-02-13T15:00:00Z" {
 		t.Fatalf("completed_at = %q", body.CompletedAt)
 	}
+
+	sourceRecord := db.mobileTokens[hashMobileToken(testSyncToken)]
+	if sourceRecord.Status != mobileTokenStateRotated {
+		t.Fatalf("source token status = %q", sourceRecord.Status)
+	}
+	targetRecord := db.mobileTokens[hashMobileToken(testTargetDeviceToken)]
+	if targetRecord.UserID != db.userSnapshot.userID {
+		t.Fatalf("target token user_id = %q", targetRecord.UserID)
+	}
+	if targetRecord.WriterEpoch != db.writerEpoch {
+		t.Fatalf("target token writer_epoch = %d", targetRecord.WriterEpoch)
+	}
+	if targetRecord.Status != mobileTokenStateActive {
+		t.Fatalf("target token status = %q", targetRecord.Status)
+	}
+}
+
+func TestMigrationTakeoverRouteTokenOnlyBodySuccess(t *testing.T) {
+	db := &fakeMigrationForcedTakeoverDB{
+		userSnapshot: fakeForcedTakeoverUserSnapshot{
+			userID:         "8d3c4d78-6c2b-4b56-a430-1e6b97f5b362",
+			writerDeviceID: "0b854f80-0213-4cb1-b5d0-95af02f137f3",
+		},
+		recoveryMatched:    true,
+		migrationRequestID: "50d8f081-baa5-4fc0-ab40-c4236068db59",
+		writerEpoch:        14,
+		completedAt:        time.Date(2026, 2, 13, 15, 5, 0, 0, time.UTC),
+		mobileTokens:       newMigrationTestMobileTokens(),
+	}
+	server := NewServer("127.0.0.1:0", db)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, migrationsTakeoverPath, strings.NewReader(validMigrationTakeoverTokenOnlyBody))
+	req.Header.Set(requestIDHeader, "req-takeover-success")
+	setSyncAuthHeader(req, testTargetDeviceToken)
+	server.httpServer.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	sourceRecord := db.mobileTokens[hashMobileToken(testSyncToken)]
+	if sourceRecord.Status != mobileTokenStateRotated {
+		t.Fatalf("source token status = %q", sourceRecord.Status)
+	}
+	targetRecord := db.mobileTokens[hashMobileToken(testTargetDeviceToken)]
+	if targetRecord.UserID != db.userSnapshot.userID {
+		t.Fatalf("target token user_id = %q", targetRecord.UserID)
+	}
+	if targetRecord.WriterEpoch != db.writerEpoch {
+		t.Fatalf("target token writer_epoch = %d", targetRecord.WriterEpoch)
+	}
 }
 
 func TestMigrationForcedTakeoverRoutePairingCodeFormatInvalid(t *testing.T) {
@@ -76,6 +135,7 @@ func TestMigrationForcedTakeoverRoutePairingCodeFormatInvalid(t *testing.T) {
 		"to_device_id":"f2df11ef-7240-42b2-8ceb-623ad7711e0c"
 	}`))
 	req.Header.Set(requestIDHeader, "req-forced-pairing-format")
+	setSyncAuthHeader(req, testTargetDeviceToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
@@ -117,6 +177,7 @@ func TestMigrationForcedTakeoverRoutePairingOrRecoveryInvalid(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPost, migrationsForcedTakeoverPath, strings.NewReader(validMigrationForcedTakeoverBody))
 			req.Header.Set(requestIDHeader, "req-forced-invalid")
+			setSyncAuthHeader(req, testTargetDeviceToken)
 			server.httpServer.Handler.ServeHTTP(rec, req)
 
 			if rec.Code != http.StatusConflict {
@@ -173,6 +234,11 @@ func TestMigrationForcedTakeoverRouteStateConflict(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPost, migrationsForcedTakeoverPath, strings.NewReader(requestBody))
 			req.Header.Set(requestIDHeader, "req-forced-state-conflict")
+			token := testTargetDeviceToken
+			if tc.name == "to_device equals current writer" {
+				token = testSyncToken
+			}
+			setSyncAuthHeader(req, token)
 			server.httpServer.Handler.ServeHTTP(rec, req)
 
 			if rec.Code != http.StatusConflict {
@@ -195,6 +261,7 @@ func TestMigrationForcedTakeoverRateLimitOrder(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, migrationsForcedTakeoverPath, strings.NewReader(validMigrationForcedTakeoverBody))
 		req.Header.Set(requestIDHeader, "req-forced-rate-order-1")
+		setSyncAuthHeader(req, testTargetDeviceToken)
 		server.httpServer.Handler.ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusTooManyRequests {
@@ -216,6 +283,7 @@ func TestMigrationForcedTakeoverRateLimitOrder(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, migrationsForcedTakeoverPath, strings.NewReader(validMigrationForcedTakeoverBody))
 		req.Header.Set(requestIDHeader, "req-forced-rate-order-2")
+		setSyncAuthHeader(req, testTargetDeviceToken)
 		server.httpServer.Handler.ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusTooManyRequests {
@@ -238,6 +306,7 @@ func TestMigrationForcedTakeoverRouteUnknownField(t *testing.T) {
 		"unknown":"x"
 	}`))
 	req.Header.Set(requestIDHeader, "req-forced-unknown")
+	setSyncAuthHeader(req, testTargetDeviceToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
@@ -269,6 +338,7 @@ type fakeMigrationForcedTakeoverDB struct {
 	writerEpoch        int64
 	completedAt        time.Time
 	failOnInsert       error
+	mobileTokens       map[string]fakeMobileTokenRecord
 }
 
 type fakeForcedTakeoverUserSnapshot struct {
@@ -280,13 +350,25 @@ func (f *fakeMigrationForcedTakeoverDB) Health(context.Context) error {
 	return nil
 }
 
+func (f *fakeMigrationForcedTakeoverDB) resolveMobileAuthContextDirect(header mobileTokenHeader) (mobileAuthContext, error) {
+	return testMobileAuthContextForToken(header.Token), nil
+}
+
 func (f *fakeMigrationForcedTakeoverDB) WithTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
-	tx := &fakeMigrationForcedTakeoverTx{db: f}
-	return fn(tx)
+	tx := &fakeMigrationForcedTakeoverTx{
+		db:           f,
+		mobileTokens: cloneFakeMobileTokenRecords(f.mobileTokens),
+	}
+	if err := fn(tx); err != nil {
+		return err
+	}
+	f.mobileTokens = tx.mobileTokens
+	return nil
 }
 
 type fakeMigrationForcedTakeoverTx struct {
-	db *fakeMigrationForcedTakeoverDB
+	db           *fakeMigrationForcedTakeoverDB
+	mobileTokens map[string]fakeMobileTokenRecord
 }
 
 func (f *fakeMigrationForcedTakeoverTx) Begin(context.Context) (pgx.Tx, error) {
@@ -304,8 +386,20 @@ func (f *fakeMigrationForcedTakeoverTx) LargeObjects() pgx.LargeObjects { return
 func (f *fakeMigrationForcedTakeoverTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
 	return nil, nil
 }
-func (f *fakeMigrationForcedTakeoverTx) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
-	return pgconn.CommandTag{}, nil
+func (f *fakeMigrationForcedTakeoverTx) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+	switch {
+	case strings.Contains(query, "UPDATE mobile_tokens") && strings.Contains(query, "SET status = 'ROTATED'"):
+		userID, _ := args[0].(string)
+		rotateMigrationTestActiveMobileTokensByUser(f.mobileTokens, userID)
+		return pgconn.CommandTag{}, nil
+	case strings.Contains(query, "UPDATE mobile_tokens") && strings.Contains(query, "SET user_id = $2::uuid"):
+		deviceID, _ := args[0].(string)
+		userID, _ := args[1].(string)
+		writerEpoch, _ := args[2].(int64)
+		return pgconn.CommandTag{}, bindMigrationTestMobileTokensByDevice(f.mobileTokens, deviceID, userID, writerEpoch)
+	default:
+		return pgconn.CommandTag{}, nil
+	}
 }
 func (f *fakeMigrationForcedTakeoverTx) Query(context.Context, string, ...any) (pgx.Rows, error) {
 	return nil, nil

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -18,14 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-const (
-	deviceAuthHeader             = "Authorization"
-	deviceAuthBearerPrefix       = "Bearer "
-	deviceAuthUserIDHeader       = "X-User-ID"
-	deviceAuthDeviceIDHeader     = "X-Device-ID"
-	deviceAuthWriterEpochHeader  = "X-Writer-Epoch"
-	pairingCodeGenerateMaxRetrys = 8
-)
+const pairingCodeGenerateMaxRetrys = 8
 
 type pairingCodeQueryRequest struct {
 	EnsureGenerated *bool `json:"ensure_generated"`
@@ -66,7 +58,7 @@ func (s *Server) pairingCodeQueryHandler(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		return err
 	}
-	auth, err := parseDeviceAuthHeaders(r)
+	auth, err := resolvePairingCodeQueryAuth(r.Context(), s.db, r)
 	if err != nil {
 		return err
 	}
@@ -95,32 +87,19 @@ func parsePairingCodeQueryBody(reader io.Reader) (bool, error) {
 	return *body.EnsureGenerated, nil
 }
 
-func parseDeviceAuthHeaders(r *http.Request) (pairingCodeQueryAuth, error) {
-	authHeader := strings.TrimSpace(r.Header.Get(deviceAuthHeader))
-	if len(authHeader) <= len(deviceAuthBearerPrefix) || !strings.EqualFold(authHeader[:len(deviceAuthBearerPrefix)], deviceAuthBearerPrefix) {
-		return pairingCodeQueryAuth{}, unauthorizedDevice()
+func resolvePairingCodeQueryAuth(ctx context.Context, db HealthChecker, r *http.Request) (pairingCodeQueryAuth, error) {
+	header, err := parseMobileTokenHeaders(r)
+	if err != nil {
+		return pairingCodeQueryAuth{}, err
 	}
-	token := strings.TrimSpace(authHeader[len(deviceAuthBearerPrefix):])
-	if token == "" {
-		return pairingCodeQueryAuth{}, unauthorizedDevice()
+	auth, err := resolveMobileAuthContext(ctx, db, header, true)
+	if err != nil {
+		return pairingCodeQueryAuth{}, err
 	}
-
-	userID := strings.TrimSpace(r.Header.Get(deviceAuthUserIDHeader))
-	deviceID := strings.TrimSpace(r.Header.Get(deviceAuthDeviceIDHeader))
-	writerEpochRaw := strings.TrimSpace(r.Header.Get(deviceAuthWriterEpochHeader))
-
-	if !uuidRegex.MatchString(userID) || !uuidRegex.MatchString(deviceID) {
-		return pairingCodeQueryAuth{}, unauthorizedDevice()
-	}
-	writerEpoch, err := strconv.ParseInt(writerEpochRaw, 10, 64)
-	if err != nil || writerEpoch <= 0 {
-		return pairingCodeQueryAuth{}, unauthorizedDevice()
-	}
-
 	return pairingCodeQueryAuth{
-		UserID:      strings.ToLower(userID),
-		DeviceID:    strings.ToLower(deviceID),
-		WriterEpoch: writerEpoch,
+		UserID:      auth.UserID,
+		DeviceID:    auth.DeviceID,
+		WriterEpoch: auth.WriterEpoch,
 	}, nil
 }
 

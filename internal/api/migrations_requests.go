@@ -16,8 +16,7 @@ import (
 )
 
 const (
-	migrationsRequestsPath           = "/api/v1/migrations/requests"
-	migrationClientFingerprintHeader = "X-Client-Fingerprint"
+	migrationsRequestsPath = "/api/v1/migrations/requests"
 )
 
 type migrationRequestResponse struct {
@@ -36,13 +35,21 @@ func (s *Server) migrationRequestsHandler(w http.ResponseWriter, r *http.Request
 		return apperrors.New(http.StatusMethodNotAllowed, methodNotAllowedCode, "method not allowed")
 	}
 
-	input, err := parseMigrationRequestCreateInput(io.LimitReader(r.Body, migrationRequestBodyMaxBytes))
+	header, err := parseMobileTokenHeaders(r)
+	if err != nil {
+		return err
+	}
+	auth, err := resolveMobileAuthContext(r.Context(), s.db, header, true)
+	if err != nil {
+		return err
+	}
+	input, err := parseMigrationRequestCreateInputWithAuth(io.LimitReader(r.Body, migrationRequestBodyMaxBytes), auth)
 	if err != nil {
 		return err
 	}
 
-	fingerprint := migrationClientFingerprint(r, input.FromDeviceID)
-	if err := s.checkMigrationRequestRateLimit(input.UserID, fingerprint); err != nil {
+	fingerprint := migrationClientFingerprint(r, auth.DeviceID)
+	if err := s.checkMigrationRequestRateLimit(auth.UserID, fingerprint); err != nil {
 		return err
 	}
 
@@ -60,7 +67,7 @@ func (s *Server) migrationRequestsHandler(w http.ResponseWriter, r *http.Request
 }
 
 func migrationClientFingerprint(r *http.Request, fallback string) string {
-	value := strings.TrimSpace(r.Header.Get(migrationClientFingerprintHeader))
+	value := strings.TrimSpace(r.Header.Get(clientFingerprintHeader))
 	if value == "" {
 		return fallback
 	}

@@ -35,6 +35,23 @@ func TestParseMigrationRequestCreateInputSuccess(t *testing.T) {
 	}
 }
 
+func TestParseMigrationRequestCreateInputWithAuthSuccess(t *testing.T) {
+	input, err := parseMigrationRequestCreateInputWithAuth(strings.NewReader(`{
+		"to_device_id":"f2df11ef-7240-42b2-8ceb-623ad7711e0c",
+		"mode":"NORMAL",
+		"expires_at":"2026-02-12T11:00:00Z"
+	}`), testMobileAuthContextForToken(testSyncToken))
+	if err != nil {
+		t.Fatalf("parseMigrationRequestCreateInputWithAuth() error = %v", err)
+	}
+	if input.UserID != testUserID {
+		t.Fatalf("user_id = %q", input.UserID)
+	}
+	if input.FromDeviceID != testDeviceID {
+		t.Fatalf("from_device_id = %q", input.FromDeviceID)
+	}
+}
+
 func TestParseMigrationRequestCreateInputUnknownField(t *testing.T) {
 	_, err := parseMigrationRequestCreateInput(strings.NewReader(`{
 		"user_id":"8d3c4d78-6c2b-4b56-a430-1e6b97f5b362",
@@ -83,6 +100,20 @@ func TestParseMigrationConfirmInputSuccess(t *testing.T) {
 	}
 }
 
+func TestParseMigrationConfirmInputWithAuthSuccess(t *testing.T) {
+	input, err := parseMigrationConfirmInputWithAuth(
+		"f58e8ce4-1dba-4c4c-b5e0-d71ce357eb60",
+		strings.NewReader(`{"action":"CONFIRM"}`),
+		testMobileAuthContextForToken(testSyncToken),
+	)
+	if err != nil {
+		t.Fatalf("parseMigrationConfirmInputWithAuth() error = %v", err)
+	}
+	if input.OperatorDeviceID != testDeviceID {
+		t.Fatalf("operator_device_id = %q", input.OperatorDeviceID)
+	}
+}
+
 func TestParseMigrationConfirmInputInvalidArgument(t *testing.T) {
 	_, err := parseMigrationConfirmInput(
 		"not-a-uuid",
@@ -110,6 +141,19 @@ func TestParseMigrationForcedTakeoverInputSuccess(t *testing.T) {
 	}
 	if input.RecoveryCode != "AB12CD34EF56GH78" {
 		t.Fatalf("recovery_code = %q", input.RecoveryCode)
+	}
+}
+
+func TestParseMigrationForcedTakeoverInputWithAuthSuccess(t *testing.T) {
+	input, err := parseMigrationForcedTakeoverInputWithAuth(strings.NewReader(`{
+		"pairing_code":"39481726",
+		"recovery_code":"ab12cd34ef56gh78"
+	}`), testMobileAuthContextForToken(testTargetDeviceToken))
+	if err != nil {
+		t.Fatalf("parseMigrationForcedTakeoverInputWithAuth() error = %v", err)
+	}
+	if input.ToDeviceID != "f2df11ef-7240-42b2-8ceb-623ad7711e0c" {
+		t.Fatalf("to_device_id = %q", input.ToDeviceID)
 	}
 }
 

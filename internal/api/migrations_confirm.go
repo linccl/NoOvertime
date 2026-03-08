@@ -48,13 +48,22 @@ func (s *Server) migrationConfirmHandler(w http.ResponseWriter, r *http.Request)
 		return apperrors.New(http.StatusMethodNotAllowed, methodNotAllowedCode, "method not allowed")
 	}
 
-	migrationRequestID := migrationConfirmPathID(r)
-	input, err := parseMigrationConfirmInput(migrationRequestID, io.LimitReader(r.Body, migrationRequestBodyMaxBytes))
+	header, err := parseMobileTokenHeaders(r)
+	if err != nil {
+		return err
+	}
+	auth, err := resolveMobileAuthContext(r.Context(), s.db, header, true)
 	if err != nil {
 		return err
 	}
 
-	fingerprint := migrationClientFingerprint(r, input.OperatorDeviceID)
+	migrationRequestID := migrationConfirmPathID(r)
+	input, err := parseMigrationConfirmInputWithAuth(migrationRequestID, io.LimitReader(r.Body, migrationRequestBodyMaxBytes), auth)
+	if err != nil {
+		return err
+	}
+
+	fingerprint := migrationClientFingerprint(r, auth.DeviceID)
 	if err := s.checkMigrationConfirmRateLimit(input.MigrationRequestID, fingerprint); err != nil {
 		return err
 	}
@@ -157,6 +166,12 @@ UPDATE devices
  WHERE user_id = $1
    AND device_id = $2
 `, snapshot.UserID, snapshot.ToDeviceID); err != nil {
+			return err
+		}
+		if err := rotateActiveMobileTokensByUser(ctx, tx, snapshot.UserID); err != nil {
+			return err
+		}
+		if err := bindMobileTokensByDevice(ctx, tx, snapshot.UserID, snapshot.ToDeviceID, writerEpoch); err != nil {
 			return err
 		}
 

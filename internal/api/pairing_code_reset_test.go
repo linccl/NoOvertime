@@ -106,7 +106,7 @@ func TestPairingCodeResetRouteUnauthorizedDevice(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	assertErrorEnvelope(t, rec, http.StatusUnauthorized, unauthorizedDeviceCode, "req-pairing-reset-unauthorized")
+	assertErrorEnvelope(t, rec, http.StatusUnauthorized, unauthorizedMobileTokenCode, "req-pairing-reset-unauthorized")
 }
 
 func TestPairingCodeResetRouteRateLimitBlocked(t *testing.T) {
@@ -226,6 +226,10 @@ type fakePairingCodeResetDB struct {
 
 func (f *fakePairingCodeResetDB) Health(context.Context) error {
 	return nil
+}
+
+func (f *fakePairingCodeResetDB) resolveMobileAuthContextDirect(header mobileTokenHeader) (mobileAuthContext, error) {
+	return testMobileAuthContextForToken(header.Token), nil
 }
 
 func (f *fakePairingCodeResetDB) WithTx(ctx context.Context, fn func(tx pgx.Tx) error) error {

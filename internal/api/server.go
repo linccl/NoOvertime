@@ -69,9 +69,12 @@ func NewServer(addr string, db HealthChecker) *Server {
 	}
 
 	s.handle("/health", s.healthHandler)
+	s.handle(tokensIssuePath, s.tokenIssueHandler)
+	s.handle(tokensRotatePath, s.tokenRotateHandler)
 	s.handle("/api/v1/sync/commits", s.syncCommitsHandler)
 	s.handle("/api/v1/migrations/requests", s.migrationRequestsHandler)
 	s.handle(migrationsConfirmPathPattern, s.migrationConfirmHandler)
+	s.handle(migrationsTakeoverPath, s.migrationForcedTakeoverHandler)
 	s.handle(migrationsForcedTakeoverPath, s.migrationForcedTakeoverHandler)
 	s.handle(pairingCodeQueryPath, s.pairingCodeQueryHandler)
 	s.handle(pairingCodeResetPath, s.pairingCodeResetHandler)

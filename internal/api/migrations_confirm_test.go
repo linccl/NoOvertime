@@ -39,6 +39,7 @@ func TestMigrationConfirmRouteSuccess(t *testing.T) {
 		},
 		updatedWriterEpoch: 13,
 		completedAt:        time.Date(2026, 2, 13, 14, 20, 0, 0, time.UTC),
+		mobileTokens:       newMigrationTestMobileTokens(),
 	}
 	server := NewServer("127.0.0.1:0", db)
 
@@ -49,6 +50,7 @@ func TestMigrationConfirmRouteSuccess(t *testing.T) {
 		strings.NewReader(validMigrationConfirmBody),
 	)
 	req.Header.Set(requestIDHeader, "req-migration-confirm-success")
+	setSyncAuthHeader(req, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -77,6 +79,21 @@ func TestMigrationConfirmRouteSuccess(t *testing.T) {
 	if body.CompletedAt != "2026-02-13T14:20:00Z" {
 		t.Fatalf("completed_at = %q", body.CompletedAt)
 	}
+
+	sourceRecord := db.mobileTokens[hashMobileToken(testSyncToken)]
+	if sourceRecord.Status != mobileTokenStateRotated {
+		t.Fatalf("source token status = %q", sourceRecord.Status)
+	}
+	targetRecord := db.mobileTokens[hashMobileToken(testTargetDeviceToken)]
+	if targetRecord.UserID != db.migrationSnapshot.userID {
+		t.Fatalf("target token user_id = %q", targetRecord.UserID)
+	}
+	if targetRecord.WriterEpoch != db.updatedWriterEpoch {
+		t.Fatalf("target token writer_epoch = %d", targetRecord.WriterEpoch)
+	}
+	if targetRecord.Status != mobileTokenStateActive {
+		t.Fatalf("target token status = %q", targetRecord.Status)
+	}
 }
 
 func TestMigrationConfirmRoutePathIDInvalid(t *testing.T) {
@@ -85,6 +102,7 @@ func TestMigrationConfirmRoutePathIDInvalid(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, migrationConfirmPath("not-a-uuid"), strings.NewReader(validMigrationConfirmBody))
 	req.Header.Set(requestIDHeader, "req-migration-confirm-invalid-path")
+	setSyncAuthHeader(req, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
@@ -100,6 +118,7 @@ func TestMigrationConfirmRouteInvalidArgumentAndUnknownField(t *testing.T) {
 	recInvalid := httptest.NewRecorder()
 	reqInvalid := httptest.NewRequest(http.MethodPost, path, strings.NewReader(strings.Replace(validMigrationConfirmBody, `"CONFIRM"`, `"REJECT"`, 1)))
 	reqInvalid.Header.Set(requestIDHeader, "req-migration-confirm-invalid")
+	setSyncAuthHeader(reqInvalid, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(recInvalid, reqInvalid)
 
 	if recInvalid.Code != http.StatusBadRequest {
@@ -110,6 +129,7 @@ func TestMigrationConfirmRouteInvalidArgumentAndUnknownField(t *testing.T) {
 	recUnknown := httptest.NewRecorder()
 	reqUnknown := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"action":"CONFIRM","operator_device_id":"0b854f80-0213-4cb1-b5d0-95af02f137f3","unknown":"x"}`))
 	reqUnknown.Header.Set(requestIDHeader, "req-migration-confirm-unknown")
+	setSyncAuthHeader(reqUnknown, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(recUnknown, reqUnknown)
 
 	if recUnknown.Code != http.StatusBadRequest {
@@ -130,6 +150,7 @@ func TestMigrationConfirmRouteRateLimitBlocked(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, migrationConfirmPath("f58e8ce4-1dba-4c4c-b5e0-d71ce357eb60"), strings.NewReader(validMigrationConfirmBody))
 	req.Header.Set(requestIDHeader, "req-migration-confirm-rate-limit")
+	setSyncAuthHeader(req, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusTooManyRequests {
@@ -177,9 +198,11 @@ func TestMigrationConfirmRouteConflictScenarios(t *testing.T) {
 			wantCode: migrationExpiredCode,
 		},
 		{
-			name:         "source mismatch",
-			overrideBody: `{"action":"CONFIRM","operator_device_id":"11111111-1111-4111-8111-111111111111"}`,
-			wantCode:     migrationSourceMismatchCode,
+			name: "source mismatch",
+			prepareDB: func(db *fakeMigrationConfirmDB) {
+				db.migrationSnapshot.fromDeviceID = "11111111-1111-4111-8111-111111111111"
+			},
+			wantCode: migrationSourceMismatchCode,
 		},
 		{
 			name: "stale writer",
@@ -225,6 +248,7 @@ func TestMigrationConfirmRouteConflictScenarios(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPost, migrationConfirmPath("f58e8ce4-1dba-4c4c-b5e0-d71ce357eb60"), strings.NewReader(body))
 			req.Header.Set(requestIDHeader, "req-migration-confirm-conflict")
+			setSyncAuthHeader(req, testSyncToken)
 			server.httpServer.Handler.ServeHTTP(rec, req)
 
 			if rec.Code != http.StatusConflict {
@@ -241,6 +265,7 @@ type fakeMigrationConfirmDB struct {
 	updatedWriterEpoch  int64
 	completedAt         time.Time
 	failOnUpdateConfirm error
+	mobileTokens        map[string]fakeMobileTokenRecord
 }
 
 type fakeMigrationConfirmSnapshot struct {
@@ -260,13 +285,25 @@ func (f *fakeMigrationConfirmDB) Health(context.Context) error {
 	return nil
 }
 
+func (f *fakeMigrationConfirmDB) resolveMobileAuthContextDirect(header mobileTokenHeader) (mobileAuthContext, error) {
+	return testMobileAuthContextForToken(header.Token), nil
+}
+
 func (f *fakeMigrationConfirmDB) WithTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
-	tx := &fakeMigrationConfirmTx{db: f}
-	return fn(tx)
+	tx := &fakeMigrationConfirmTx{
+		db:           f,
+		mobileTokens: cloneFakeMobileTokenRecords(f.mobileTokens),
+	}
+	if err := fn(tx); err != nil {
+		return err
+	}
+	f.mobileTokens = tx.mobileTokens
+	return nil
 }
 
 type fakeMigrationConfirmTx struct {
-	db *fakeMigrationConfirmDB
+	db           *fakeMigrationConfirmDB
+	mobileTokens map[string]fakeMobileTokenRecord
 }
 
 func (f *fakeMigrationConfirmTx) Begin(context.Context) (pgx.Tx, error) {
@@ -282,13 +319,22 @@ func (f *fakeMigrationConfirmTx) LargeObjects() pgx.LargeObjects                
 func (f *fakeMigrationConfirmTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
 	return nil, nil
 }
-func (f *fakeMigrationConfirmTx) Exec(_ context.Context, query string, _ ...any) (pgconn.CommandTag, error) {
+func (f *fakeMigrationConfirmTx) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
 	switch {
 	case strings.Contains(query, "UPDATE migration_requests") && strings.Contains(query, "SET status = 'CONFIRMED'"):
 		if f.db.failOnUpdateConfirm != nil {
 			return pgconn.CommandTag{}, f.db.failOnUpdateConfirm
 		}
 		return pgconn.CommandTag{}, nil
+	case strings.Contains(query, "UPDATE mobile_tokens") && strings.Contains(query, "SET status = 'ROTATED'"):
+		userID, _ := args[0].(string)
+		rotateMigrationTestActiveMobileTokensByUser(f.mobileTokens, userID)
+		return pgconn.CommandTag{}, nil
+	case strings.Contains(query, "UPDATE mobile_tokens") && strings.Contains(query, "SET user_id = $2::uuid"):
+		deviceID, _ := args[0].(string)
+		userID, _ := args[1].(string)
+		writerEpoch, _ := args[2].(int64)
+		return pgconn.CommandTag{}, bindMigrationTestMobileTokensByDevice(f.mobileTokens, deviceID, userID, writerEpoch)
 	default:
 		return pgconn.CommandTag{}, nil
 	}
