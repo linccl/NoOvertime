@@ -20,7 +20,9 @@ const (
 	webBindingVersionImmutableCode     = "WEB_BINDING_VERSION_IMMUTABLE"
 	webBindingUserImmutableCode        = "WEB_BINDING_USER_IMMUTABLE"
 	unauthorizedDeviceCode             = "UNAUTHORIZED_DEVICE"
+	unauthorizedMobileTokenCode        = "UNAUTHORIZED_MOBILE_TOKEN"
 	unauthorizedWebTokenCode           = "UNAUTHORIZED_WEB_TOKEN"
+	userIDNotReadyCode                 = "USER_ID_NOT_READY"
 )
 
 // mapRuleErrorKeyToAPIError maps database P0001 error_key values to API errors.

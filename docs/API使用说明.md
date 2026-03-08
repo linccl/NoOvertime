@@ -3,10 +3,12 @@
 本文档用于本地联调与调用示例，当前已实现路由如下（以 `internal/api/server.go` 注册为准；其中 `/health` 与 `/api/v1/sync/commits` 提供详细示例，其余接口语义见 `docs/API契约草案.md`）：
 
 - `GET /health`
+- `POST /api/v1/tokens/issue`
+- `POST /api/v1/tokens/rotate`
 - `POST /api/v1/sync/commits`
 - `POST /api/v1/migrations/requests`
 - `POST /api/v1/migrations/{migration_request_id}/confirm`
-- `POST /api/v1/migrations/forced-takeover`
+- `POST /api/v1/migrations/takeover`（兼容旧路径 `POST /api/v1/migrations/forced-takeover`）
 - `POST /api/v1/pairing-code/query`
 - `POST /api/v1/pairing-code/reset`
 - `POST /api/v1/recovery-code/generate`
@@ -20,6 +22,8 @@
 
 - 请求 Content-Type：`application/json`（建议显式设置）。
 - 响应 Content-Type：`application/json; charset=utf-8`。
+- 移动端受保护接口统一使用 `Authorization: Bearer <token>`。
+- 可选传入 `X-Client-Fingerprint`；`X-User-ID` / `X-Device-ID` / `X-Writer-Epoch` 已不再要求。
 - 支持传入 `X-Request-ID`；若未传入服务端会自动生成，并在响应头回显。
 - 所有错误响应都包含以下结构：
 
@@ -75,11 +79,9 @@ curl -i http://127.0.0.1:29082/health
 ```bash
 curl -i -X POST 'http://127.0.0.1:29082/api/v1/sync/commits' \
   -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <mobile_token>' \
   -H 'X-Request-ID: req-sync-001' \
   -d '{
-    "user_id":"8d3c4d78-6c2b-4b56-a430-1e6b97f5b362",
-    "device_id":"0b854f80-0213-4cb1-b5d0-95af02f137f3",
-    "writer_epoch":12,
     "sync_id":"bb5166cb-13ed-47a0-9fb5-58e2062a3559",
     "payload_hash":"<computed_sha256_hex>",
     "punch_records":[{"id":"4acb45c8-65cb-4e20-9602-2ac3609d5c28","local_date":"2026-02-12","type":"START","at_utc":"2026-02-12T01:10:00Z","timezone_id":"Asia/Shanghai","minute_of_day":550,"source":"MANUAL","deleted_at":null,"version":3}],
@@ -96,6 +98,7 @@ curl -i -X POST 'http://127.0.0.1:29082/api/v1/sync/commits' \
   "request_id": "req-sync-001",
   "gate_result": "APPLIED",
   "gate_reason": "APPLIED_WRITE",
+  "user_id": "8d3c4d78-6c2b-4b56-a430-1e6b97f5b362",
   "sync_commit": {
     "sync_id": "bb5166cb-13ed-47a0-9fb5-58e2062a3559",
     "status": "APPLIED",
@@ -111,6 +114,7 @@ curl -i -X POST 'http://127.0.0.1:29082/api/v1/sync/commits' \
   "request_id": "req-sync-replay-001",
   "gate_result": "NOOP",
   "gate_reason": "REPLAY_NOOP",
+  "user_id": "8d3c4d78-6c2b-4b56-a430-1e6b97f5b362",
   "sync_commit": {
     "sync_id": "bb5166cb-13ed-47a0-9fb5-58e2062a3559",
     "status": "APPLIED",

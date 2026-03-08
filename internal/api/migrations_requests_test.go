@@ -24,6 +24,12 @@ const validMigrationRequestPayload = `{
 	"expires_at": "2026-02-12T11:00:00Z"
 }`
 
+const validMigrationRequestTokenOnlyPayload = `{
+	"to_device_id": "f2df11ef-7240-42b2-8ceb-623ad7711e0c",
+	"mode": "NORMAL",
+	"expires_at": "2026-02-12T11:00:00Z"
+}`
+
 func TestMigrationRequestsRouteSuccess(t *testing.T) {
 	db := &fakeMigrationRequestDB{
 		row: fakeMigrationRequestRow{
@@ -38,6 +44,7 @@ func TestMigrationRequestsRouteSuccess(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, migrationsRequestsPath, strings.NewReader(validMigrationRequestPayload))
 	req.Header.Set(requestIDHeader, "req-migration-request-success")
+	setSyncAuthHeader(req, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -65,12 +72,47 @@ func TestMigrationRequestsRouteSuccess(t *testing.T) {
 	}
 }
 
+func TestMigrationRequestsRouteTokenOnlyBodySuccess(t *testing.T) {
+	db := &fakeMigrationRequestDB{
+		row: fakeMigrationRequestRow{
+			migrationRequestID: "0a137472-577d-4af7-b8f1-d96a0d67aa8d",
+			status:             "PENDING",
+			mode:               "NORMAL",
+			expiresAt:          time.Date(2026, 2, 12, 11, 0, 0, 0, time.UTC),
+		},
+	}
+	server := NewServer("127.0.0.1:0", db)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, migrationsRequestsPath, strings.NewReader(validMigrationRequestTokenOnlyPayload))
+	req.Header.Set(requestIDHeader, "req-migration-request-token-only")
+	setSyncAuthHeader(req, testSyncToken)
+	server.httpServer.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestMigrationRequestsRouteUserIDNotReady(t *testing.T) {
+	server := NewServer("127.0.0.1:0", &fakeMigrationRequestDB{})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, migrationsRequestsPath, strings.NewReader(validMigrationRequestTokenOnlyPayload))
+	req.Header.Set(requestIDHeader, "req-migration-request-user-not-ready")
+	setSyncAuthHeader(req, testAnonymousSyncToken)
+	server.httpServer.Handler.ServeHTTP(rec, req)
+
+	assertErrorEnvelope(t, rec, http.StatusConflict, userIDNotReadyCode, "req-migration-request-user-not-ready")
+}
+
 func TestMigrationRequestsRouteInvalidArgument(t *testing.T) {
 	server := NewServer("127.0.0.1:0", healthyDB{})
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, migrationsRequestsPath, strings.NewReader(strings.Replace(validMigrationRequestPayload, `"mode": "NORMAL"`, `"mode": "FORCED"`, 1)))
 	req.Header.Set(requestIDHeader, "req-migration-request-invalid")
+	setSyncAuthHeader(req, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
@@ -85,6 +127,7 @@ func TestMigrationRequestsRouteUnknownField(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, migrationsRequestsPath, strings.NewReader(strings.Replace(validMigrationRequestPayload, `"mode": "NORMAL",`, `"mode": "NORMAL", "unknown_field": "x",`, 1)))
 	req.Header.Set(requestIDHeader, "req-migration-request-unknown")
+	setSyncAuthHeader(req, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
@@ -105,6 +148,7 @@ func TestMigrationRequestsRouteRateLimitBlocked(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, migrationsRequestsPath, strings.NewReader(validMigrationRequestPayload))
 	req.Header.Set(requestIDHeader, "req-migration-request-rate-limit")
+	setSyncAuthHeader(req, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusTooManyRequests {
@@ -165,6 +209,7 @@ func TestMigrationRequestsRouteConflictMappings(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPost, migrationsRequestsPath, strings.NewReader(validMigrationRequestPayload))
 			req.Header.Set(requestIDHeader, "req-migration-request-conflict")
+			setSyncAuthHeader(req, testSyncToken)
 			server.httpServer.Handler.ServeHTTP(rec, req)
 
 			if rec.Code != http.StatusConflict {
@@ -205,6 +250,10 @@ type fakeMigrationRequestDB struct {
 
 func (f *fakeMigrationRequestDB) Health(context.Context) error {
 	return nil
+}
+
+func (f *fakeMigrationRequestDB) resolveMobileAuthContextDirect(header mobileTokenHeader) (mobileAuthContext, error) {
+	return testMobileAuthContextForToken(header.Token), nil
 }
 
 func (f *fakeMigrationRequestDB) WithTx(ctx context.Context, fn func(tx pgx.Tx) error) error {

@@ -3,10 +3,12 @@
 NoOvertime 后端服务（Go + PostgreSQL），当前提供以下核心接口：
 
 - `GET /health`
+- `POST /api/v1/tokens/issue`
+- `POST /api/v1/tokens/rotate`
 - `POST /api/v1/sync/commits`
 - `POST /api/v1/migrations/requests`
 - `POST /api/v1/migrations/{migration_request_id}/confirm`
-- `POST /api/v1/migrations/forced-takeover`
+- `POST /api/v1/migrations/takeover`（兼容旧路径 `POST /api/v1/migrations/forced-takeover`）
 - `POST /api/v1/pairing-code/query`
 - `POST /api/v1/pairing-code/reset`
 - `POST /api/v1/recovery-code/generate`
@@ -91,11 +93,9 @@ curl -i http://127.0.0.1:29082/health
 ```bash
 curl -i -X POST 'http://127.0.0.1:29082/api/v1/sync/commits' \
   -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <mobile_token>' \
   -H 'X-Request-ID: req-sync-demo-001' \
   -d '{
-    "user_id":"8d3c4d78-6c2b-4b56-a430-1e6b97f5b362",
-    "device_id":"0b854f80-0213-4cb1-b5d0-95af02f137f3",
-    "writer_epoch":12,
     "sync_id":"bb5166cb-13ed-47a0-9fb5-58e2062a3559",
     "payload_hash":"<computed_sha256_hex>",
     "punch_records":[{"id":"4acb45c8-65cb-4e20-9602-2ac3609d5c28","local_date":"2026-02-12","type":"START","at_utc":"2026-02-12T01:10:00Z","timezone_id":"Asia/Shanghai","minute_of_day":550,"source":"MANUAL","deleted_at":null,"version":3}],
@@ -105,7 +105,7 @@ curl -i -X POST 'http://127.0.0.1:29082/api/v1/sync/commits' \
   }'
 ```
 
-更多接口语义、错误码与 gate 字段说明见：`docs/API使用说明.md`。
+更多接口语义、错误码与 gate 字段说明见：`docs/API使用说明.md`。首次成功同步后，服务端会在响应中回填 `user_id`。
 
 ## gate 字段语义
 

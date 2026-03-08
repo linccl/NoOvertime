@@ -137,7 +137,7 @@ func TestRecoveryCodeResetRouteUnauthorizedDevice(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	assertErrorEnvelope(t, rec, http.StatusUnauthorized, unauthorizedDeviceCode, "req-recovery-reset-unauthorized")
+	assertErrorEnvelope(t, rec, http.StatusUnauthorized, unauthorizedMobileTokenCode, "req-recovery-reset-unauthorized")
 	if db.withTxCalls != 0 {
 		t.Fatalf("withTxCalls = %d", db.withTxCalls)
 	}
@@ -274,6 +274,10 @@ type fakeRecoveryCodeResetDB struct {
 
 func (f *fakeRecoveryCodeResetDB) Health(context.Context) error {
 	return nil
+}
+
+func (f *fakeRecoveryCodeResetDB) resolveMobileAuthContextDirect(header mobileTokenHeader) (mobileAuthContext, error) {
+	return testMobileAuthContextForToken(header.Token), nil
 }
 
 func (f *fakeRecoveryCodeResetDB) WithTx(ctx context.Context, fn func(tx pgx.Tx) error) error {

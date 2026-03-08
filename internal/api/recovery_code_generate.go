@@ -50,7 +50,7 @@ func (s *Server) recoveryCodeGenerateHandler(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		return err
 	}
-	auth, err := parseDeviceAuthHeaders(r)
+	auth, err := resolvePairingCodeQueryAuth(r.Context(), s.db, r)
 	if err != nil {
 		return err
 	}

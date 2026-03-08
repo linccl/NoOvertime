@@ -42,7 +42,7 @@ func (s *Server) pairingCodeResetHandler(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		return err
 	}
-	auth, err := parseDeviceAuthHeaders(r)
+	auth, err := resolvePairingCodeQueryAuth(r.Context(), s.db, r)
 	if err != nil {
 		return err
 	}

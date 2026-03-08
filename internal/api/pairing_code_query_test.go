@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -105,6 +104,18 @@ func TestPairingCodeQueryRouteGenerateFirstTime(t *testing.T) {
 	}
 }
 
+func TestPairingCodeQueryRouteUserIDNotReady(t *testing.T) {
+	server := NewServer("127.0.0.1:0", &fakePairingCodeQueryDB{})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, pairingCodeQueryPath, strings.NewReader(validPairingCodeQueryPayload))
+	req.Header.Set(requestIDHeader, "req-pairing-query-user-not-ready")
+	setSyncAuthHeader(req, testAnonymousSyncToken)
+	server.httpServer.Handler.ServeHTTP(rec, req)
+
+	assertErrorEnvelope(t, rec, http.StatusConflict, userIDNotReadyCode, "req-pairing-query-user-not-ready")
+}
+
 func TestPairingCodeQueryRouteUnknownField(t *testing.T) {
 	server := NewServer("127.0.0.1:0", healthyDB{})
 
@@ -145,7 +156,7 @@ func TestPairingCodeQueryRouteUnauthorizedDevice(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	assertErrorEnvelope(t, rec, http.StatusUnauthorized, unauthorizedDeviceCode, "req-pairing-query-unauthorized")
+	assertErrorEnvelope(t, rec, http.StatusUnauthorized, unauthorizedMobileTokenCode, "req-pairing-query-unauthorized")
 	if db.withTxCalls != 0 {
 		t.Fatalf("withTxCalls = %d", db.withTxCalls)
 	}
@@ -194,11 +205,8 @@ func TestPairingCodeQueryRouteUserNotFound(t *testing.T) {
 	assertErrorEnvelope(t, rec, http.StatusConflict, userNotFoundCode, "req-pairing-query-user-not-found")
 }
 
-func setPairingQueryAuthHeaders(req *http.Request, userID, deviceID string, writerEpoch int64) {
-	req.Header.Set(deviceAuthHeader, "Bearer mock-device-token")
-	req.Header.Set(deviceAuthUserIDHeader, userID)
-	req.Header.Set(deviceAuthDeviceIDHeader, deviceID)
-	req.Header.Set(deviceAuthWriterEpochHeader, strconv.FormatInt(writerEpoch, 10))
+func setPairingQueryAuthHeaders(req *http.Request, _ string, _ string, _ int64) {
+	setSyncAuthHeader(req, testSyncToken)
 }
 
 type fakePairingCodeQueryDB struct {
@@ -217,6 +225,10 @@ type fakePairingCodeQueryDB struct {
 
 func (f *fakePairingCodeQueryDB) Health(context.Context) error {
 	return nil
+}
+
+func (f *fakePairingCodeQueryDB) resolveMobileAuthContextDirect(header mobileTokenHeader) (mobileAuthContext, error) {
+	return testMobileAuthContextForToken(header.Token), nil
 }
 
 func (f *fakePairingCodeQueryDB) WithTx(ctx context.Context, fn func(tx pgx.Tx) error) error {

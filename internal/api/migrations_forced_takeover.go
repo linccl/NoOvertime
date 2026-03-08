@@ -15,6 +15,7 @@ import (
 )
 
 const (
+	migrationsTakeoverPath       = "/api/v1/migrations/takeover"
 	migrationsForcedTakeoverPath = "/api/v1/migrations/forced-takeover"
 
 	pairingCodeFormatInvalidCode = "PAIRING_CODE_FORMAT_INVALID"
@@ -45,12 +46,20 @@ func (s *Server) migrationForcedTakeoverHandler(w http.ResponseWriter, r *http.R
 		return apperrors.New(http.StatusMethodNotAllowed, methodNotAllowedCode, "method not allowed")
 	}
 
-	input, err := parseMigrationForcedTakeoverInput(io.LimitReader(r.Body, migrationRequestBodyMaxBytes))
+	header, err := parseMobileTokenHeaders(r)
+	if err != nil {
+		return err
+	}
+	auth, err := resolveMobileAuthContext(r.Context(), s.db, header, true)
+	if err != nil {
+		return err
+	}
+	input, err := parseMigrationForcedTakeoverInputWithAuth(io.LimitReader(r.Body, migrationRequestBodyMaxBytes), auth)
 	if err != nil {
 		return err
 	}
 
-	fingerprint := migrationClientFingerprint(r, input.ToDeviceID)
+	fingerprint := migrationClientFingerprint(r, auth.DeviceID)
 	if err := s.checkRecoveryVerifyRateLimit(input.PairingCode, fingerprint); err != nil {
 		return err
 	}
@@ -146,6 +155,12 @@ UPDATE devices
  WHERE user_id = $1
    AND device_id = $2
 `, userSnapshot.UserID, input.ToDeviceID); err != nil {
+			return err
+		}
+		if err := rotateActiveMobileTokensByUser(ctx, tx, userSnapshot.UserID); err != nil {
+			return err
+		}
+		if err := bindMobileTokensByDevice(ctx, tx, userSnapshot.UserID, input.ToDeviceID, writerEpoch); err != nil {
 			return err
 		}
 

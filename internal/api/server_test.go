@@ -20,6 +20,10 @@ type healthyDB struct{}
 
 func (healthyDB) Health(context.Context) error { return nil }
 
+func (healthyDB) resolveMobileAuthContextDirect(header mobileTokenHeader) (mobileAuthContext, error) {
+	return testMobileAuthContextForToken(header.Token), nil
+}
+
 type unhealthyDB struct{}
 
 func (unhealthyDB) Health(context.Context) error { return errors.New("db down") }
@@ -241,6 +245,7 @@ func TestMigrationRoutesRejectNonPostWithUnifiedError(t *testing.T) {
 	}{
 		{name: "requests", path: "/api/v1/migrations/requests"},
 		{name: "confirm", path: "/api/v1/migrations/f58e8ce4-1dba-4c4c-b5e0-d71ce357eb60/confirm"},
+		{name: "takeover", path: "/api/v1/migrations/takeover"},
 		{name: "forced_takeover", path: "/api/v1/migrations/forced-takeover"},
 	}
 
@@ -249,6 +254,7 @@ func TestMigrationRoutesRejectNonPostWithUnifiedError(t *testing.T) {
 			reqID := "req-" + tc.name + "-method-not-allowed"
 			request := httptest.NewRequest(http.MethodGet, tc.path, nil)
 			request.Header.Set(requestIDHeader, reqID)
+			setSyncAuthHeader(request, testSyncToken)
 			recorder := httptest.NewRecorder()
 
 			server.httpServer.Handler.ServeHTTP(recorder, request)
@@ -292,6 +298,11 @@ func TestMigrationRoutesRegisteredAndUseUnifiedWriteError(t *testing.T) {
 			body: `{}`,
 		},
 		{
+			name: "takeover",
+			path: "/api/v1/migrations/takeover",
+			body: `{}`,
+		},
+		{
 			name: "forced_takeover",
 			path: "/api/v1/migrations/forced-takeover",
 			body: `{}`,
@@ -303,6 +314,7 @@ func TestMigrationRoutesRegisteredAndUseUnifiedWriteError(t *testing.T) {
 			reqID := "req-" + tc.name + "-route-hit"
 			request := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
 			request.Header.Set(requestIDHeader, reqID)
+			setSyncAuthHeader(request, testSyncToken)
 			recorder := httptest.NewRecorder()
 
 			server.httpServer.Handler.ServeHTTP(recorder, request)
@@ -387,6 +399,7 @@ func TestBatch2RoutesRejectNonPostWithUnifiedError(t *testing.T) {
 			reqID := "req-batch2-" + tc.name + "-method-not-allowed"
 			request := httptest.NewRequest(http.MethodGet, tc.path, nil)
 			request.Header.Set(requestIDHeader, reqID)
+			setSyncAuthHeader(request, testSyncToken)
 			recorder := httptest.NewRecorder()
 
 			server.httpServer.Handler.ServeHTTP(recorder, request)
@@ -435,6 +448,7 @@ func TestBatch2RoutesRegisteredAndUseUnifiedWriteError(t *testing.T) {
 			reqID := "req-batch2-" + tc.name + "-route-hit"
 			request := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(`{}`))
 			request.Header.Set(requestIDHeader, reqID)
+			setSyncAuthHeader(request, testSyncToken)
 			recorder := httptest.NewRecorder()
 
 			server.httpServer.Handler.ServeHTTP(recorder, request)

@@ -1,8 +1,8 @@
 # NoOvertime API契约草案
 
-> 状态：Draft v0.1  
+> 状态：Draft v0.1（已按 2026-03-08 token-only 实现口径收敛关键移动端接口）  
 > 任务：TASK-03（步骤2：API 契约草案）  
-> 基线文档：`docs/需求文档.md`、`docs/数据库方案草案.md`、`docs/实施计划.md`、`db/migrations/001_init.sql`
+> 基线文档：`docs/需求文档.md`、`docs/数据库方案草案.md`、`docs/实施计划.md`、`db/migrations/001_init.sql`、`docs/安卓端TokenOnly改造对API端总览.md`
 
 ## 1. 通用约定
 
@@ -15,10 +15,10 @@
 
 ### 1.2 鉴权模型
 
-- `DeviceAuth`：移动端部分写接口（配对码/恢复码），请求头携带 `Authorization: Bearer <device_access_token>` + `X-User-ID` + `X-Device-ID` + `X-Writer-Epoch`
-- `WriterDeviceOnly`：必须是当前写入端（`sync/commits` 与配对码/恢复码接口校验 `device_id == users.writer_device_id` 且 `writer_epoch == users.writer_epoch`；迁移相关接口当前仅校验设备 ID 匹配当前 writer）
-- `WebBindingToken`：Web 只读令牌，请求体携带 `binding_token` + `client_fingerprint`
-- `Anonymous`：无需登录，但仍需限流与设备指纹
+- `BearerMobileToken`：移动端统一鉴权头，使用 `Authorization: Bearer <token>`；服务端从 token 解析 `user_id`（可为空）、内部 `device_id`、`writer_epoch` 与 `token_status`。
+- `WriterDeviceOnly`：必须是当前写入端；服务端使用 token 内部 `device_id/writer_epoch` 与 `users.writer_device_id/users.writer_epoch` 校验。
+- `WebBindingToken`：Web 只读令牌，请求体携带 `binding_token` + `client_fingerprint`。
+- `AnonymousMobileToken`：仅 `tokens/*` 与 `sync/commits` 允许匿名 token；其余移动端受保护接口统一返回 `409 USER_ID_NOT_READY`。
 
 ### 1.3 通用错误响应
 
@@ -49,26 +49,59 @@
 补充说明（MVP 实现细节）：
 
 - Web 侧接口：`client_fingerprint_hash` 来源为请求体字段 `client_fingerprint`。
-- 移动端写接口（迁移申请/确认/强制接管、配对码重置、恢复码生成/重置）：`client_fingerprint_hash` 来源为 Header `X-Client-Fingerprint`；若缺省服务端会用对应设备 ID（`from_device_id/operator_device_id/to_device_id` 或 `X-Device-ID`）兜底。
+- 移动端写接口（迁移申请/确认/接管、配对码重置、恢复码生成/重置）：`client_fingerprint_hash` 来源为 Header `X-Client-Fingerprint`；若缺省服务端会用当前 Bearer token 派生的内部 `device_id` 兜底。
 
 ---
 
-## 2. 接口定义（12项）
+## 2. 接口定义（关键移动端接口）
+
+### 2.0 移动端 token 基础设施
+
+#### 2.0.1 token 签发
+
+- Method & Path：`POST /api/v1/tokens/issue`
+- 鉴权要求：`Anonymous`
+- 请求体：可选 `client_fingerprint`
+- 语义：仅签发新 token，不创建 `user_id`
+
+响应 JSON 示例：
+
+```json
+{
+  "token": "tok_xxx",
+  "user_id": null,
+  "token_status": "ANONYMOUS"
+}
+```
+
+#### 2.0.2 token 轮换
+
+- Method & Path：`POST /api/v1/tokens/rotate`
+- 鉴权要求：`BearerMobileToken`
+- 请求体：可选 `client_fingerprint`
+- 语义：新 token 生效后旧 token 立即失效；若旧 token 已绑定 `user_id`，新 token 继承绑定关系。
+
+响应 JSON 示例：
+
+```json
+{
+  "token": "tok_new",
+  "user_id": "8d3c4d78-6c2b-4b56-a430-1e6b97f5b362",
+  "token_status": "BOUND"
+}
+```
 
 ### 2.1 同步上报（Punch/LeaveRecord/DaySummary/MonthSummary 原子提交）
 
 - Method & Path：`POST /api/v1/sync/commits`
 - 幂等字段：`sync_id` + `payload_hash`
-- 鉴权要求：`Anonymous + WriterDeviceOnly`（MVP：不校验 `DeviceAuth`）
+- 鉴权要求：`BearerMobileToken`；匿名 token 允许提交，首次成功同步时服务端会创建并绑定 `user_id`，随后按 `WriterDeviceOnly` 校验。
 - 限流策略：通用写入限流（网关层），并叠加写入端校验（失败映射为 `STALE_WRITER_REJECTED`；DB `error_key=SYNC_COMMIT_STALE_WRITER`）
 
 请求 JSON 示例：
 
 ```json
 {
-  "user_id": "8d3c4d78-6c2b-4b56-a430-1e6b97f5b362",
-  "device_id": "0b854f80-0213-4cb1-b5d0-95af02f137f3",
-  "writer_epoch": 12,
   "sync_id": "bb5166cb-13ed-47a0-9fb5-58e2062a3559",
   "payload_hash": "abe0945d40deb79e2dbabd4a73933e338ac622d51e2732ee37ec8aa96981f190",
   "punch_records": [
@@ -140,6 +173,7 @@
   "request_id": "f6ed4994-4bf4-4726-af57-a04506eedda0",
   "gate_result": "APPLIED",
   "gate_reason": "APPLIED_WRITE",
+  "user_id": "8d3c4d78-6c2b-4b56-a430-1e6b97f5b362",
   "sync_commit": {
     "sync_id": "bb5166cb-13ed-47a0-9fb5-58e2062a3559",
     "status": "APPLIED",
@@ -155,6 +189,7 @@
   "request_id": "a51cb77e-8b66-40a1-9965-207f58d7c314",
   "gate_result": "NOOP",
   "gate_reason": "REPLAY_NOOP",
+  "user_id": "8d3c4d78-6c2b-4b56-a430-1e6b97f5b362",
   "sync_commit": {
     "sync_id": "bb5166cb-13ed-47a0-9fb5-58e2062a3559",
     "status": "APPLIED",
@@ -195,15 +230,13 @@
 
 - Method & Path：`POST /api/v1/migrations/requests`
 - 幂等字段：`N/A`
-- 鉴权要求：`Anonymous + WriterDeviceOnly`（MVP：不校验 `DeviceAuth`；`from_device_id` 必须匹配当前 writer）
+- 鉴权要求：`BearerMobileToken + WriterDeviceOnly`；请求体新口径仅需 `to_device_id` / `mode` / `expires_at`，`user_id` 与 `from_device_id` 从 token 派生；若兼容字段仍上传，必须与 token 派生值一致。
 - 限流策略：`MIGRATION_REQUEST`
 
 请求 JSON 示例：
 
 ```json
 {
-  "user_id": "8d3c4d78-6c2b-4b56-a430-1e6b97f5b362",
-  "from_device_id": "0b854f80-0213-4cb1-b5d0-95af02f137f3",
   "to_device_id": "f2df11ef-7240-42b2-8ceb-623ad7711e0c",
   "mode": "NORMAL",
   "expires_at": "2026-02-12T11:00:00Z"
@@ -224,6 +257,8 @@
 错误码列表：
 
 - `RATE_LIMIT_BLOCKED`
+- `RATE_LIMIT_BLOCKED`
+- `USER_ID_NOT_READY`
 - `MIGRATION_SOURCE_MISMATCH`
 - `MIGRATION_PENDING_EXISTS`
 - `MIGRATION_STATE_INVALID`
@@ -234,15 +269,14 @@
 
 - Method & Path：`POST /api/v1/migrations/{migration_request_id}/confirm`
 - 幂等字段：`N/A`
-- 鉴权要求：`Anonymous + WriterDeviceOnly`（MVP：不校验 `DeviceAuth`；旧机确认）
+- 鉴权要求：`BearerMobileToken + WriterDeviceOnly`；请求体新口径仅需 `action`，`operator_device_id` 从 token 派生；若兼容字段仍上传，必须与 token 派生值一致。
 - 限流策略：`MIGRATION_CONFIRM`
 
 请求 JSON 示例：
 
 ```json
 {
-  "action": "CONFIRM",
-  "operator_device_id": "0b854f80-0213-4cb1-b5d0-95af02f137f3"
+  "action": "CONFIRM"
 }
 ```
 
@@ -262,16 +296,17 @@
 错误码列表：
 
 - `RATE_LIMIT_BLOCKED`
+- `USER_ID_NOT_READY`
 - `MIGRATION_STATE_INVALID`
 - `MIGRATION_EXPIRED`
 - `MIGRATION_SOURCE_MISMATCH`
 - `STALE_WRITER_REJECTED`
 
-### 2.4 强制接管（配对码 + 恢复码）
+### 2.4 迁移接管（配对码 + 恢复码）
 
-- Method & Path：`POST /api/v1/migrations/forced-takeover`
+- Method & Path：优先 `POST /api/v1/migrations/takeover`；兼容旧路径 `POST /api/v1/migrations/forced-takeover`
 - 幂等字段：`N/A`
-- 鉴权要求：`Anonymous`（MVP：不校验 `DeviceAuth`；请求体输入 `pairing_code`、`recovery_code`）
+- 鉴权要求：`BearerMobileToken`；请求体新口径仅需 `pairing_code` 与 `recovery_code`，`to_device_id` 从 token 派生；若兼容字段仍上传，必须与 token 派生值一致。匿名 token 统一返回 `409 USER_ID_NOT_READY`。
 - 限流策略：先走 `RECOVERY_VERIFY`，再走 `MIGRATION_REQUEST`
 
 请求 JSON 示例：
@@ -279,8 +314,7 @@
 ```json
 {
   "pairing_code": "<pairing_code>",
-  "recovery_code": "<recovery_code>",
-  "to_device_id": "f2df11ef-7240-42b2-8ceb-623ad7711e0c"
+  "recovery_code": "<recovery_code>"
 }
 ```
 
@@ -300,6 +334,7 @@
 错误码列表：
 
 - `RATE_LIMIT_BLOCKED`
+- `USER_ID_NOT_READY`
 - `PAIRING_CODE_FORMAT_INVALID`
 - `PAIRING_CODE_INVALID`
 - `RECOVERY_CODE_INVALID`
@@ -309,7 +344,7 @@
 
 - Method & Path：`POST /api/v1/pairing-code/query`
 - 幂等字段：`N/A`
-- 鉴权要求：`DeviceAuth + WriterDeviceOnly`
+- 鉴权要求：`BearerMobileToken + WriterDeviceOnly`；匿名 token 返回 `409 USER_ID_NOT_READY`。
 - 限流策略：通用写入限流（网关层）
 
 请求 JSON 示例：
@@ -333,7 +368,8 @@
 
 错误码列表：
 
-- `UNAUTHORIZED_DEVICE`
+- `UNAUTHORIZED_MOBILE_TOKEN`
+- `USER_ID_NOT_READY`
 - `STALE_WRITER_REJECTED`
 - `USER_NOT_FOUND`
 
@@ -341,7 +377,7 @@
 
 - Method & Path：`POST /api/v1/pairing-code/reset`
 - 幂等字段：`N/A`
-- 鉴权要求：`DeviceAuth + WriterDeviceOnly`
+- 鉴权要求：`BearerMobileToken + WriterDeviceOnly`；匿名 token 返回 `409 USER_ID_NOT_READY`。
 - 限流策略：`PAIRING_RESET`
 
 请求 JSON 示例：
@@ -366,6 +402,8 @@
 错误码列表：
 
 - `RATE_LIMIT_BLOCKED`
+- `UNAUTHORIZED_MOBILE_TOKEN`
+- `USER_ID_NOT_READY`
 - `PAIRING_CODE_GENERATE_FAILED`
 - `USER_NOT_FOUND`
 - `STALE_WRITER_REJECTED`
@@ -374,7 +412,7 @@
 
 - Method & Path：`POST /api/v1/recovery-code/generate`
 - 幂等字段：`N/A`
-- 鉴权要求：`DeviceAuth + WriterDeviceOnly`
+- 鉴权要求：`BearerMobileToken + WriterDeviceOnly`；匿名 token 返回 `409 USER_ID_NOT_READY`。
 - 限流策略：`RECOVERY_VERIFY`
 
 请求 JSON 示例：
@@ -399,6 +437,8 @@
 错误码列表：
 
 - `RATE_LIMIT_BLOCKED`
+- `UNAUTHORIZED_MOBILE_TOKEN`
+- `USER_ID_NOT_READY`
 - `RECOVERY_CODE_ALREADY_INITIALIZED`
 - `STALE_WRITER_REJECTED`
 
@@ -406,7 +446,7 @@
 
 - Method & Path：`POST /api/v1/recovery-code/reset`
 - 幂等字段：`N/A`
-- 鉴权要求：`DeviceAuth + WriterDeviceOnly`
+- 鉴权要求：`BearerMobileToken + WriterDeviceOnly`；匿名 token 返回 `409 USER_ID_NOT_READY`。
 - 限流策略：`RECOVERY_VERIFY`
 
 请求 JSON 示例：
@@ -432,6 +472,8 @@
 错误码列表：
 
 - `RATE_LIMIT_BLOCKED`
+- `UNAUTHORIZED_MOBILE_TOKEN`
+- `USER_ID_NOT_READY`
 - `RECOVERY_CODE_INVALID`
 - `STALE_WRITER_REJECTED`
 
@@ -715,11 +757,11 @@ FR-031 规则族统一说明：`AUTO_PUNCH_ON_FULL_DAY_LEAVE` 与 `FULL_DAY_LEAV
 规范化步骤：
 
 1. 顶层键顺序固定为：  
-   `user_id` / `device_id` / `writer_epoch` / `sync_id` / `punch_records` / `leave_records` / `day_summaries` / `month_summaries`
+   `sync_id` / `punch_records` / `leave_records` / `day_summaries` / `month_summaries`
 2. 对象字段顺序按本契约定义顺序输出（不按客户端原始顺序）
 3. 数组排序按稳定业务键：  
    `punch_records`/`leave_records`：按 `id` 升序；`day_summaries`：按 `local_date` 升序，若同日再按 `id` 升序；`month_summaries`：按 `month_start` 升序，若同月再按 `id` 升序
-4. UUID 字段统一为小写（例如 `user_id/device_id/sync_id` 及各实体 `id`），避免大小写差异导致哈希不一致
+4. UUID 字段统一为小写（例如 `sync_id` 及各实体 `id`），避免大小写差异导致哈希不一致
 5. 时间字段统一为 UTC RFC3339（不含毫秒）；其中 `punch_records[].at_utc` 必须为分钟精度：`YYYY-MM-DDTHH:mm:00Z`
 6. 字段白名单：仅参与写入结果的字段参与哈希（不含 `trace_id`、`client_time` 等调试/本地元数据）
 7. 未知字段拒绝：请求出现白名单外字段，直接返回 `UNKNOWN_FIELD`，禁止“透传后忽略”

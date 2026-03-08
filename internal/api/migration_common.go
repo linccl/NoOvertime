@@ -65,12 +65,23 @@ func parseMigrationRequestCreateInput(reader io.Reader) (migrationRequestCreateI
 	if err := decodeStrictMigrationJSON(reader, &body); err != nil {
 		return migrationRequestCreateInput{}, err
 	}
+	return normalizeMigrationRequestCreateInput(body, mobileAuthContext{}, false)
+}
 
-	userID, err := requireUUID("user_id", body.UserID)
+func parseMigrationRequestCreateInputWithAuth(reader io.Reader, auth mobileAuthContext) (migrationRequestCreateInput, error) {
+	var body migrationRequestCreateBody
+	if err := decodeStrictMigrationJSON(reader, &body); err != nil {
+		return migrationRequestCreateInput{}, err
+	}
+	return normalizeMigrationRequestCreateInput(body, auth, true)
+}
+
+func normalizeMigrationRequestCreateInput(body migrationRequestCreateBody, auth mobileAuthContext, useAuth bool) (migrationRequestCreateInput, error) {
+	userID, err := resolveTokenBackedUUID("user_id", body.UserID, auth.UserID, useAuth)
 	if err != nil {
 		return migrationRequestCreateInput{}, err
 	}
-	fromDeviceID, err := requireUUID("from_device_id", body.FromDeviceID)
+	fromDeviceID, err := resolveTokenBackedUUID("from_device_id", body.FromDeviceID, auth.DeviceID, useAuth)
 	if err != nil {
 		return migrationRequestCreateInput{}, err
 	}
@@ -101,13 +112,29 @@ func parseMigrationRequestCreateInput(reader io.Reader) (migrationRequestCreateI
 }
 
 func parseMigrationConfirmInput(migrationRequestID string, reader io.Reader) (migrationConfirmInput, error) {
-	normalizedMigrationID, err := requireUUID("migration_request_id", migrationRequestID)
-	if err != nil {
-		return migrationConfirmInput{}, err
-	}
-
 	var body migrationConfirmBody
 	if err := decodeStrictMigrationJSON(reader, &body); err != nil {
+		return migrationConfirmInput{}, err
+	}
+	return normalizeMigrationConfirmInput(migrationRequestID, body, mobileAuthContext{}, false)
+}
+
+func parseMigrationConfirmInputWithAuth(migrationRequestID string, reader io.Reader, auth mobileAuthContext) (migrationConfirmInput, error) {
+	var body migrationConfirmBody
+	if err := decodeStrictMigrationJSON(reader, &body); err != nil {
+		return migrationConfirmInput{}, err
+	}
+	return normalizeMigrationConfirmInput(migrationRequestID, body, auth, true)
+}
+
+func normalizeMigrationConfirmInput(
+	migrationRequestID string,
+	body migrationConfirmBody,
+	auth mobileAuthContext,
+	useAuth bool,
+) (migrationConfirmInput, error) {
+	normalizedMigrationID, err := requireUUID("migration_request_id", migrationRequestID)
+	if err != nil {
 		return migrationConfirmInput{}, err
 	}
 
@@ -115,7 +142,7 @@ func parseMigrationConfirmInput(migrationRequestID string, reader io.Reader) (mi
 	if err != nil {
 		return migrationConfirmInput{}, err
 	}
-	operatorDeviceID, err := requireUUID("operator_device_id", body.OperatorDeviceID)
+	operatorDeviceID, err := resolveTokenBackedUUID("operator_device_id", body.OperatorDeviceID, auth.DeviceID, useAuth)
 	if err != nil {
 		return migrationConfirmInput{}, err
 	}
@@ -132,7 +159,22 @@ func parseMigrationForcedTakeoverInput(reader io.Reader) (migrationForcedTakeove
 	if err := decodeStrictMigrationJSON(reader, &body); err != nil {
 		return migrationForcedTakeoverInput{}, err
 	}
+	return normalizeMigrationForcedTakeoverInput(body, mobileAuthContext{}, false)
+}
 
+func parseMigrationForcedTakeoverInputWithAuth(reader io.Reader, auth mobileAuthContext) (migrationForcedTakeoverInput, error) {
+	var body migrationForcedTakeoverBody
+	if err := decodeStrictMigrationJSON(reader, &body); err != nil {
+		return migrationForcedTakeoverInput{}, err
+	}
+	return normalizeMigrationForcedTakeoverInput(body, auth, true)
+}
+
+func normalizeMigrationForcedTakeoverInput(
+	body migrationForcedTakeoverBody,
+	auth mobileAuthContext,
+	useAuth bool,
+) (migrationForcedTakeoverInput, error) {
 	pairingCode, err := parsePairingCode(body.PairingCode)
 	if err != nil {
 		return migrationForcedTakeoverInput{}, err
@@ -141,7 +183,7 @@ func parseMigrationForcedTakeoverInput(reader io.Reader) (migrationForcedTakeove
 	if err != nil {
 		return migrationForcedTakeoverInput{}, err
 	}
-	toDeviceID, err := requireUUID("to_device_id", body.ToDeviceID)
+	toDeviceID, err := resolveTokenBackedUUID("to_device_id", body.ToDeviceID, auth.DeviceID, useAuth)
 	if err != nil {
 		return migrationForcedTakeoverInput{}, err
 	}
@@ -151,6 +193,29 @@ func parseMigrationForcedTakeoverInput(reader io.Reader) (migrationForcedTakeove
 		RecoveryCode: recoveryCode,
 		ToDeviceID:   toDeviceID,
 	}, nil
+}
+
+func resolveTokenBackedUUID(field, legacyRaw, tokenValue string, useAuth bool) (string, error) {
+	if !useAuth {
+		return requireUUID(field, legacyRaw)
+	}
+
+	normalizedTokenValue, err := requireUUID(field, tokenValue)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(legacyRaw) == "" {
+		return normalizedTokenValue, nil
+	}
+
+	legacyValue, err := requireUUID(field, legacyRaw)
+	if err != nil {
+		return "", err
+	}
+	if legacyValue != normalizedTokenValue {
+		return "", invalidArgument(fmt.Sprintf("%s does not match bearer token", field))
+	}
+	return normalizedTokenValue, nil
 }
 
 func decodeStrictMigrationJSON(reader io.Reader, payload any) error {

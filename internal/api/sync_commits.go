@@ -62,9 +62,6 @@ var (
 )
 
 type syncCommitRequest struct {
-	UserID         string             `json:"user_id"`
-	DeviceID       string             `json:"device_id"`
-	WriterEpoch    int64              `json:"writer_epoch"`
 	SyncID         string             `json:"sync_id"`
 	PayloadHash    string             `json:"payload_hash"`
 	PunchRecords   []punchRecordJSON  `json:"punch_records"`
@@ -179,6 +176,7 @@ type syncCommitResponse struct {
 	RequestID  string               `json:"request_id"`
 	GateResult string               `json:"gate_result"`
 	GateReason string               `json:"gate_reason"`
+	UserID     string               `json:"user_id"`
 	SyncCommit syncCommitResultBody `json:"sync_commit"`
 }
 
@@ -210,26 +208,46 @@ type syncCommitGateDecision struct {
 	Message   string
 }
 
-func gateAndPersistSyncCommit(ctx context.Context, db HealthChecker, input SyncCommitInput, now time.Time) (syncCommitGateDecision, error) {
+func gateAndPersistSyncCommit(
+	ctx context.Context,
+	db HealthChecker,
+	header mobileTokenHeader,
+	input SyncCommitInput,
+	now time.Time,
+) (SyncCommitInput, syncCommitGateDecision, error) {
 	txDB, ok := db.(syncCommitTxDB)
 	if !ok {
-		return syncCommitGateDecision{}, fmt.Errorf("database does not support sync commit transactions")
+		return SyncCommitInput{}, syncCommitGateDecision{}, fmt.Errorf("database does not support sync commit transactions")
 	}
 
+	resolvedInput := input
 	var decision syncCommitGateDecision
 	if err := txDB.WithTx(ctx, func(tx pgx.Tx) error {
+		auth, err := loadMobileAuthContext(ctx, tx, header, true)
+		if err != nil {
+			return err
+		}
+		auth, err = bindAnonymousMobileToken(ctx, tx, auth)
+		if err != nil {
+			return err
+		}
+
+		resolvedInput.UserID = auth.UserID
+		resolvedInput.DeviceID = auth.DeviceID
+		resolvedInput.WriterEpoch = auth.WriterEpoch
+
 		createdAt := now.UTC()
-		record, inserted, err := tryInsertSyncCommitRecord(ctx, tx, input, createdAt)
+		record, inserted, err := tryInsertSyncCommitRecord(ctx, tx, resolvedInput, createdAt)
 		if err != nil {
 			return err
 		}
 
 		if !inserted {
-			existing, err := loadSyncCommitRecord(ctx, tx, input.UserID, input.SyncID)
+			existing, err := loadSyncCommitRecord(ctx, tx, resolvedInput.UserID, resolvedInput.SyncID)
 			if err != nil {
 				return err
 			}
-			if existing.PayloadHash == input.PayloadHash {
+			if existing.PayloadHash == resolvedInput.PayloadHash {
 				decision = syncCommitGateDecision{
 					Result: gateResultNoop,
 					Reason: gateReasonReplayNoop,
@@ -247,11 +265,11 @@ func gateAndPersistSyncCommit(ctx context.Context, db HealthChecker, input SyncC
 			return nil
 		}
 
-		if err := validateSyncBusinessRules(input); err != nil {
+		if err := validateSyncBusinessRules(resolvedInput); err != nil {
 			return err
 		}
 
-		shouldApply, err := shouldApplySyncCommit(ctx, tx, input)
+		shouldApply, err := shouldApplySyncCommit(ctx, tx, resolvedInput)
 		if err != nil {
 			return err
 		}
@@ -265,16 +283,16 @@ func gateAndPersistSyncCommit(ctx context.Context, db HealthChecker, input SyncC
 		}
 
 		exec := pgxSyncCommitTxExecutor{tx: tx}
-		if err := writePunchRecords(ctx, exec, input); err != nil {
+		if err := writePunchRecords(ctx, exec, resolvedInput); err != nil {
 			return fmt.Errorf("write punch_records: %w", err)
 		}
-		if err := writeLeaveRecords(ctx, exec, input); err != nil {
+		if err := writeLeaveRecords(ctx, exec, resolvedInput); err != nil {
 			return fmt.Errorf("write leave_records: %w", err)
 		}
-		if err := writeDaySummaries(ctx, exec, input); err != nil {
+		if err := writeDaySummaries(ctx, exec, resolvedInput); err != nil {
 			return fmt.Errorf("write day_summaries: %w", err)
 		}
-		if err := writeMonthSummaries(ctx, exec, input); err != nil {
+		if err := writeMonthSummaries(ctx, exec, resolvedInput); err != nil {
 			return fmt.Errorf("write month_summaries: %w", err)
 		}
 
@@ -285,10 +303,10 @@ func gateAndPersistSyncCommit(ctx context.Context, db HealthChecker, input SyncC
 		}
 		return nil
 	}); err != nil {
-		return syncCommitGateDecision{}, err
+		return SyncCommitInput{}, syncCommitGateDecision{}, err
 	}
 
-	return decision, nil
+	return resolvedInput, decision, nil
 }
 
 func tryInsertSyncCommitRecord(ctx context.Context, tx pgx.Tx, input SyncCommitInput, createdAt time.Time) (syncCommitGateRecord, bool, error) {
@@ -408,13 +426,17 @@ func (s *Server) syncCommitsHandler(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return err
 	}
+	header, err := parseMobileTokenHeaders(r)
+	if err != nil {
+		return err
+	}
 
 	requestID := requestIDFromContext(r.Context())
 	if requestID == "" {
 		requestID = generateRequestID()
 	}
 
-	decision, err := gateAndPersistSyncCommit(r.Context(), s.db, input, s.now())
+	resolvedInput, decision, err := gateAndPersistSyncCommit(r.Context(), s.db, header, input, s.now())
 	if err != nil {
 		var apiErr apperrors.APIError
 		if errors.As(err, &apiErr) {
@@ -435,8 +457,8 @@ func (s *Server) syncCommitsHandler(w http.ResponseWriter, r *http.Request) erro
 	}
 	log.Printf(
 		"sync_commit_gate user_id=%s sync_id=%s gate_result=%s gate_reason=%s request_id=%s",
-		input.UserID,
-		input.SyncID,
+		resolvedInput.UserID,
+		resolvedInput.SyncID,
 		decision.Result,
 		decision.Reason,
 		requestID,
@@ -460,8 +482,9 @@ func (s *Server) syncCommitsHandler(w http.ResponseWriter, r *http.Request) erro
 		RequestID:  requestID,
 		GateResult: decision.Result,
 		GateReason: decision.Reason,
+		UserID:     resolvedInput.UserID,
 		SyncCommit: syncCommitResultBody{
-			SyncID:    input.SyncID,
+			SyncID:    resolvedInput.SyncID,
 			Status:    decision.Record.Status,
 			CreatedAt: decision.Record.CreatedAt.UTC().Format(time.RFC3339),
 		},
@@ -541,10 +564,7 @@ func buildCanonicalPayload(input SyncCommitInput) canonicalSyncPayload {
 	})
 
 	result := canonicalSyncPayload{
-		UserID:      input.UserID,
-		DeviceID:    input.DeviceID,
-		WriterEpoch: input.WriterEpoch,
-		SyncID:      input.SyncID,
+		SyncID: input.SyncID,
 	}
 
 	result.PunchRecords = make([]canonicalPunchRecord, 0, len(punchRecords))
@@ -607,9 +627,6 @@ func buildCanonicalPayload(input SyncCommitInput) canonicalSyncPayload {
 }
 
 type canonicalSyncPayload struct {
-	UserID         string                  `json:"user_id"`
-	DeviceID       string                  `json:"device_id"`
-	WriterEpoch    int64                   `json:"writer_epoch"`
 	SyncID         string                  `json:"sync_id"`
 	PunchRecords   []canonicalPunchRecord  `json:"punch_records"`
 	LeaveRecords   []canonicalLeaveRecord  `json:"leave_records"`
@@ -680,14 +697,6 @@ func decodeErrorToAPIError(err error) error {
 func convertSyncCommitRequest(request syncCommitRequest) (SyncCommitInput, error) {
 	var input SyncCommitInput
 
-	userID, err := requireUUID("user_id", request.UserID)
-	if err != nil {
-		return SyncCommitInput{}, err
-	}
-	deviceID, err := requireUUID("device_id", request.DeviceID)
-	if err != nil {
-		return SyncCommitInput{}, err
-	}
 	syncID, err := requireUUID("sync_id", request.SyncID)
 	if err != nil {
 		return SyncCommitInput{}, err
@@ -696,17 +705,11 @@ func convertSyncCommitRequest(request syncCommitRequest) (SyncCommitInput, error
 	if err != nil {
 		return SyncCommitInput{}, err
 	}
-	if request.WriterEpoch <= 0 {
-		return SyncCommitInput{}, invalidArgument("writer_epoch must be > 0")
-	}
 	if request.PunchRecords == nil || request.LeaveRecords == nil || request.DaySummaries == nil || request.MonthSummaries == nil {
 		return SyncCommitInput{}, invalidArgument("punch_records, leave_records, day_summaries and month_summaries are required")
 	}
 
 	input = SyncCommitInput{
-		UserID:      userID,
-		DeviceID:    deviceID,
-		WriterEpoch: request.WriterEpoch,
 		SyncID:      syncID,
 		PayloadHash: payloadHash,
 	}
