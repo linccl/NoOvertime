@@ -15,22 +15,11 @@ import (
 )
 
 const validWebDaySummariesQueryPayload = `{
-	"binding_token":"wrb_valid_binding_token",
-	"client_fingerprint":"9cfce7bcd5d6dfac2697fdf1f5b9f226",
 	"month_start":"2026-02-01"
 }`
 
 func TestWebDaySummariesQueryRouteSuccess(t *testing.T) {
-	userID := "8d3c4d78-6c2b-4b56-a430-1e6b97f5b362"
 	db := &fakeWebDaySummariesQueryDB{
-		credentialHash: hashWebBindingCredential("wrb_valid_binding_token", "9cfce7bcd5d6dfac2697fdf1f5b9f226"),
-		snapshot: webReadBindingsAuthSnapshot{
-			BindingID:                 "6f9c8306-5f7f-45d5-bf84-0a31f7066bd4",
-			UserID:                    userID,
-			Status:                    webBindingStatusActive,
-			BindingPairingCodeVersion: 4,
-			CurrentPairingCodeVersion: 4,
-		},
 		dayRows: [][]any{
 			{
 				"3cf42a4f-8107-49dd-96bd-1cd7ea6f3f54",
@@ -67,6 +56,7 @@ func TestWebDaySummariesQueryRouteSuccess(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, webDaySummariesQueryPath, strings.NewReader(validWebDaySummariesQueryPayload))
 	req.Header.Set(requestIDHeader, "req-web-day-success")
+	setSyncAuthHeader(req, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -95,44 +85,31 @@ func TestWebDaySummariesQueryRouteSuccess(t *testing.T) {
 	if body.DaySummaries[1].LeaveType == nil || *body.DaySummaries[1].LeaveType != "AM" {
 		t.Fatalf("leave_type[1] = %v", body.DaySummaries[1].LeaveType)
 	}
-
+	if db.lastResolvedToken != testSyncToken {
+		t.Fatalf("lastResolvedToken = %q", db.lastResolvedToken)
+	}
 	if db.withTxCalls != 1 {
 		t.Fatalf("withTxCalls = %d", db.withTxCalls)
 	}
 	if db.lastDayQueryArgsLen != 3 {
 		t.Fatalf("day query args len = %d", db.lastDayQueryArgsLen)
 	}
-	if db.lastDayQueryUserID != userID {
+	if db.lastDayQueryUserID != testUserID {
 		t.Fatalf("day query user_id = %q", db.lastDayQueryUserID)
 	}
 	if db.lastDayQueryStart != "2026-02-01" || db.lastDayQueryEnd != "2026-03-01" {
 		t.Fatalf("day query range = [%s, %s)", db.lastDayQueryStart, db.lastDayQueryEnd)
 	}
-	if db.touchCalls != 1 {
-		t.Fatalf("touchCalls = %d", db.touchCalls)
-	}
-	if db.lastTouchBindingID != db.snapshot.BindingID {
-		t.Fatalf("lastTouchBindingID = %q", db.lastTouchBindingID)
-	}
 }
 
 func TestWebDaySummariesQueryRouteEmpty(t *testing.T) {
-	db := &fakeWebDaySummariesQueryDB{
-		credentialHash: hashWebBindingCredential("wrb_valid_binding_token", "9cfce7bcd5d6dfac2697fdf1f5b9f226"),
-		snapshot: webReadBindingsAuthSnapshot{
-			BindingID:                 "6f9c8306-5f7f-45d5-bf84-0a31f7066bd4",
-			UserID:                    "8d3c4d78-6c2b-4b56-a430-1e6b97f5b362",
-			Status:                    webBindingStatusActive,
-			BindingPairingCodeVersion: 4,
-			CurrentPairingCodeVersion: 4,
-		},
-		dayRows: [][]any{},
-	}
+	db := &fakeWebDaySummariesQueryDB{}
 	server := NewServer("127.0.0.1:0", db)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, webDaySummariesQueryPath, strings.NewReader(validWebDaySummariesQueryPayload))
 	req.Header.Set(requestIDHeader, "req-web-day-empty")
+	setSyncAuthHeader(req, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -149,12 +126,6 @@ func TestWebDaySummariesQueryRouteEmpty(t *testing.T) {
 	if len(body.DaySummaries) != 0 {
 		t.Fatalf("day_summaries size = %d", len(body.DaySummaries))
 	}
-	if db.touchCalls != 1 {
-		t.Fatalf("touchCalls = %d", db.touchCalls)
-	}
-	if db.lastTouchBindingID != db.snapshot.BindingID {
-		t.Fatalf("lastTouchBindingID = %q", db.lastTouchBindingID)
-	}
 }
 
 func TestWebDaySummariesQueryRouteInvalid(t *testing.T) {
@@ -162,111 +133,36 @@ func TestWebDaySummariesQueryRouteInvalid(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, webDaySummariesQueryPath, strings.NewReader(`{
-		"binding_token":"wrb_valid_binding_token",
-		"client_fingerprint":"9cfce7bcd5d6dfac2697fdf1f5b9f226",
 		"month_start":"2026-02-02"
 	}`))
 	req.Header.Set(requestIDHeader, "req-web-day-invalid")
+	setSyncAuthHeader(req, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	assertErrorEnvelope(t, rec, http.StatusBadRequest, invalidArgumentCode, "req-web-day-invalid")
 }
 
-func TestWebDaySummariesQueryRouteUnauthorizedWebToken(t *testing.T) {
-	tests := []struct {
-		name    string
-		payload string
-		db      *fakeWebDaySummariesQueryDB
-	}{
-		{
-			name: "token format invalid",
-			payload: `{
-				"binding_token":"invalid-token",
-				"client_fingerprint":"9cfce7bcd5d6dfac2697fdf1f5b9f226",
-				"month_start":"2026-02-01"
-			}`,
-			db: &fakeWebDaySummariesQueryDB{},
-		},
-		{
-			name:    "token not found",
-			payload: validWebDaySummariesQueryPayload,
-			db: &fakeWebDaySummariesQueryDB{
-				credentialHash: hashWebBindingCredential("wrb_other_token", "9cfce7bcd5d6dfac2697fdf1f5b9f226"),
-			},
-		},
-		{
-			name: "token fingerprint mismatch",
-			payload: `{
-				"binding_token":"wrb_valid_binding_token",
-				"client_fingerprint":"ffffffffffffffffffffffffffffffff",
-				"month_start":"2026-02-01"
-			}`,
-			db: &fakeWebDaySummariesQueryDB{
-				credentialHash: hashWebBindingCredential("wrb_valid_binding_token", "9cfce7bcd5d6dfac2697fdf1f5b9f226"),
-			},
-		},
-	}
+func TestWebDaySummariesQueryRouteUnauthorizedMobileToken(t *testing.T) {
+	server := NewServer("127.0.0.1:0", healthyDB{})
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			server := NewServer("127.0.0.1:0", tc.db)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, webDaySummariesQueryPath, strings.NewReader(validWebDaySummariesQueryPayload))
+	req.Header.Set(requestIDHeader, "req-web-day-unauthorized")
+	server.httpServer.Handler.ServeHTTP(rec, req)
 
-			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, webDaySummariesQueryPath, strings.NewReader(tc.payload))
-			req.Header.Set(requestIDHeader, "req-web-day-unauthorized")
-			server.httpServer.Handler.ServeHTTP(rec, req)
-
-			assertErrorEnvelope(t, rec, http.StatusUnauthorized, unauthorizedWebTokenCode, "req-web-day-unauthorized")
-		})
-	}
+	assertErrorEnvelope(t, rec, http.StatusUnauthorized, unauthorizedMobileTokenCode, "req-web-day-unauthorized")
 }
 
-func TestWebDaySummariesQueryRouteConflicts(t *testing.T) {
-	tests := []struct {
-		name     string
-		snapshot webReadBindingsAuthSnapshot
-		wantCode string
-	}{
-		{
-			name: "reactivate denied",
-			snapshot: webReadBindingsAuthSnapshot{
-				BindingID:                 "6f9c8306-5f7f-45d5-bf84-0a31f7066bd4",
-				UserID:                    "8d3c4d78-6c2b-4b56-a430-1e6b97f5b362",
-				Status:                    "REVOKED",
-				BindingPairingCodeVersion: 3,
-				CurrentPairingCodeVersion: 4,
-			},
-			wantCode: webBindingReactivateDeniedCode,
-		},
-		{
-			name: "version mismatch",
-			snapshot: webReadBindingsAuthSnapshot{
-				BindingID:                 "6f9c8306-5f7f-45d5-bf84-0a31f7066bd4",
-				UserID:                    "8d3c4d78-6c2b-4b56-a430-1e6b97f5b362",
-				Status:                    webBindingStatusActive,
-				BindingPairingCodeVersion: 3,
-				CurrentPairingCodeVersion: 4,
-			},
-			wantCode: webBindingVersionMismatchCode,
-		},
-	}
+func TestWebDaySummariesQueryRouteUserIDNotReady(t *testing.T) {
+	server := NewServer("127.0.0.1:0", healthyDB{})
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			db := &fakeWebDaySummariesQueryDB{
-				credentialHash: hashWebBindingCredential("wrb_valid_binding_token", "9cfce7bcd5d6dfac2697fdf1f5b9f226"),
-				snapshot:       tc.snapshot,
-			}
-			server := NewServer("127.0.0.1:0", db)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, webDaySummariesQueryPath, strings.NewReader(validWebDaySummariesQueryPayload))
+	req.Header.Set(requestIDHeader, "req-web-day-user-not-ready")
+	setSyncAuthHeader(req, testAnonymousSyncToken)
+	server.httpServer.Handler.ServeHTTP(rec, req)
 
-			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, webDaySummariesQueryPath, strings.NewReader(validWebDaySummariesQueryPayload))
-			req.Header.Set(requestIDHeader, "req-web-day-conflict")
-			server.httpServer.Handler.ServeHTTP(rec, req)
-
-			assertErrorEnvelope(t, rec, http.StatusConflict, tc.wantCode, "req-web-day-conflict")
-		})
-	}
+	assertErrorEnvelope(t, rec, http.StatusConflict, userIDNotReadyCode, "req-web-day-user-not-ready")
 }
 
 func TestWebDaySummariesQueryRouteUnknownField(t *testing.T) {
@@ -274,12 +170,11 @@ func TestWebDaySummariesQueryRouteUnknownField(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, webDaySummariesQueryPath, strings.NewReader(`{
-		"binding_token":"wrb_valid_binding_token",
-		"client_fingerprint":"9cfce7bcd5d6dfac2697fdf1f5b9f226",
 		"month_start":"2026-02-01",
-		"unknown":"x"
+		"client_fingerprint":"legacy"
 	}`))
 	req.Header.Set(requestIDHeader, "req-web-day-unknown")
+	setSyncAuthHeader(req, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	assertErrorEnvelope(t, rec, http.StatusBadRequest, unknownFieldCode, "req-web-day-unknown")
@@ -297,17 +192,13 @@ func TestWebDaySummariesQueryRouteMethodNotAllowed(t *testing.T) {
 }
 
 type fakeWebDaySummariesQueryDB struct {
-	credentialHash string
-	snapshot       webReadBindingsAuthSnapshot
-	dayRows        [][]any
-	loadErr        error
-	queryErr       error
-	lastSeenAt     time.Time
+	authErr     error
+	authContext mobileAuthContext
+	dayRows     [][]any
+	queryErr    error
 
 	withTxCalls         int
-	lastLookupHash      string
-	touchCalls          int
-	lastTouchBindingID  string
+	lastResolvedToken   string
 	lastDayQueryArgsLen int
 	lastDayQueryUserID  string
 	lastDayQueryStart   string
@@ -316,6 +207,17 @@ type fakeWebDaySummariesQueryDB struct {
 
 func (f *fakeWebDaySummariesQueryDB) Health(context.Context) error {
 	return nil
+}
+
+func (f *fakeWebDaySummariesQueryDB) resolveMobileAuthContextDirect(header mobileTokenHeader) (mobileAuthContext, error) {
+	f.lastResolvedToken = header.Token
+	if f.authErr != nil {
+		return mobileAuthContext{}, f.authErr
+	}
+	if f.authContext.Token != "" || f.authContext.UserID != "" || f.authContext.TokenStatus != "" {
+		return f.authContext, nil
+	}
+	return testMobileAuthContextForToken(header.Token), nil
 }
 
 func (f *fakeWebDaySummariesQueryDB) WithTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
@@ -347,76 +249,33 @@ func (f *fakeWebDaySummariesQueryTx) Exec(context.Context, string, ...any) (pgco
 }
 
 func (f *fakeWebDaySummariesQueryTx) Query(_ context.Context, query string, args ...any) (pgx.Rows, error) {
-	if strings.Contains(query, "FROM day_summaries") {
-		if !strings.Contains(query, "ORDER BY local_date ASC") {
-			return nil, errors.New("day summary query missing ORDER BY local_date ASC")
-		}
-		if f.db.queryErr != nil {
-			return nil, f.db.queryErr
-		}
-		f.db.lastDayQueryArgsLen = len(args)
-		if len(args) >= 3 {
-			if v, ok := args[0].(string); ok {
-				f.db.lastDayQueryUserID = v
-			}
-			if v, ok := args[1].(string); ok {
-				f.db.lastDayQueryStart = v
-			}
-			if v, ok := args[2].(string); ok {
-				f.db.lastDayQueryEnd = v
-			}
-		}
-		return newFakeRows(f.db.dayRows), nil
+	if !strings.Contains(query, "FROM day_summaries") {
+		return nil, errors.New("unexpected query: " + query)
 	}
-	return nil, errors.New("unexpected query: " + query)
+	if !strings.Contains(query, "ORDER BY local_date ASC") {
+		return nil, errors.New("day summary query missing ORDER BY local_date ASC")
+	}
+	if f.db.queryErr != nil {
+		return nil, f.db.queryErr
+	}
+	f.db.lastDayQueryArgsLen = len(args)
+	if len(args) >= 3 {
+		if v, ok := args[0].(string); ok {
+			f.db.lastDayQueryUserID = v
+		}
+		if v, ok := args[1].(string); ok {
+			f.db.lastDayQueryStart = v
+		}
+		if v, ok := args[2].(string); ok {
+			f.db.lastDayQueryEnd = v
+		}
+	}
+	return newFakeRows(f.db.dayRows), nil
 }
 
-func (f *fakeWebDaySummariesQueryTx) QueryRow(_ context.Context, query string, args ...any) pgx.Row {
-	switch {
-	case strings.Contains(query, "FROM web_read_bindings b") && strings.Contains(query, "WHERE b.token_hash = $1"):
-		return fakeWebReadBindingsAuthRow{scanFn: func(dest ...any) error {
-			if f.db.loadErr != nil {
-				return f.db.loadErr
-			}
-			if len(args) >= 1 {
-				if tokenHash, ok := args[0].(string); ok {
-					f.db.lastLookupHash = tokenHash
-					if f.db.credentialHash != "" && tokenHash != f.db.credentialHash {
-						return pgx.ErrNoRows
-					}
-				}
-			}
-			if len(dest) != 5 {
-				return errors.New("invalid destination fields for auth snapshot")
-			}
-			*dest[0].(*string) = f.db.snapshot.BindingID
-			*dest[1].(*string) = f.db.snapshot.UserID
-			*dest[2].(*string) = f.db.snapshot.Status
-			*dest[3].(*int64) = f.db.snapshot.BindingPairingCodeVersion
-			*dest[4].(*int64) = f.db.snapshot.CurrentPairingCodeVersion
-			return nil
-		}}
-	case strings.Contains(query, "UPDATE web_read_bindings") && strings.Contains(query, "SET last_seen_at = now()"):
-		return fakeWebReadBindingsAuthRow{scanFn: func(dest ...any) error {
-			f.db.touchCalls++
-			if len(args) >= 1 {
-				if bindingID, ok := args[0].(string); ok {
-					f.db.lastTouchBindingID = bindingID
-				}
-			}
-			if len(dest) != 1 {
-				return errors.New("invalid destination fields for last_seen_at")
-			}
-			lastSeenAtPtr, ok := dest[0].(*time.Time)
-			if !ok {
-				return errors.New("dest[0] must be *time.Time")
-			}
-			*lastSeenAtPtr = f.db.lastSeenAt
-			return nil
-		}}
-	}
-	return fakeWebReadBindingsAuthRow{scanFn: func(dest ...any) error {
-		return errors.New("unexpected query: " + query)
+func (f *fakeWebDaySummariesQueryTx) QueryRow(context.Context, string, ...any) pgx.Row {
+	return fakePGXRow{scanFn: func(dest ...any) error {
+		return errors.New("unexpected query row call")
 	}}
 }
 

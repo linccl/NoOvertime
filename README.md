@@ -1,6 +1,6 @@
 # NoOvertime Backend
 
-NoOvertime 后端服务（Go + PostgreSQL），当前提供以下核心接口：
+NoOvertime 后端服务（Go + PostgreSQL），当前有效核心接口如下：
 
 - `GET /health`
 - `POST /api/v1/tokens/issue`
@@ -8,15 +8,19 @@ NoOvertime 后端服务（Go + PostgreSQL），当前提供以下核心接口：
 - `POST /api/v1/sync/commits`
 - `POST /api/v1/migrations/requests`
 - `POST /api/v1/migrations/{migration_request_id}/confirm`
-- `POST /api/v1/migrations/takeover`（兼容旧路径 `POST /api/v1/migrations/forced-takeover`）
+- `POST /api/v1/web/month-summaries/query`
+- `POST /api/v1/web/day-summaries/query`
+
+自 2026-03-14 起，以下旧流程已暂停，保留路由但统一返回 `410 FEATURE_PAUSED`：
+
+- `POST /api/v1/migrations/takeover`
+- `POST /api/v1/migrations/forced-takeover`
 - `POST /api/v1/pairing-code/query`
 - `POST /api/v1/pairing-code/reset`
 - `POST /api/v1/recovery-code/generate`
 - `POST /api/v1/recovery-code/reset`
 - `POST /api/v1/web/read-bindings`
 - `POST /api/v1/web/read-bindings/auth`
-- `POST /api/v1/web/month-summaries/query`
-- `POST /api/v1/web/day-summaries/query`
 
 ## 本地运行
 
@@ -106,6 +110,34 @@ curl -i -X POST 'http://127.0.0.1:29082/api/v1/sync/commits' \
 ```
 
 更多接口语义、错误码与 gate 字段说明见：`docs/API使用说明.md`。若要查看安卓端最新 token-only 改造对 API 端的输入，请优先阅读 `docs/安卓端TokenOnly改造对API端总览.md`。首次成功同步后，服务端会在响应中回填 `user_id`。
+
+### Web 只读查询（token-only）
+
+自 2026-03-14 起，Web 月/日汇总直接使用移动端 token 查询，不再接受 `binding_token`。
+
+按年查询月汇总：
+
+```bash
+curl -i -X POST 'http://127.0.0.1:29082/api/v1/web/month-summaries/query' \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <mobile_token>' \
+  -H 'X-Request-ID: req-web-month-001' \
+  -d '{
+    "year": 2026
+  }'
+```
+
+按月查询日汇总：
+
+```bash
+curl -i -X POST 'http://127.0.0.1:29082/api/v1/web/day-summaries/query' \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <mobile_token>' \
+  -H 'X-Request-ID: req-web-day-001' \
+  -d '{
+    "month_start": "2026-02-01"
+  }'
+```
 
 ## gate 字段语义
 

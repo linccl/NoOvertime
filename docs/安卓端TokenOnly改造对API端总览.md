@@ -17,7 +17,7 @@
 - inspector 已验收通过
 - 安卓端文档已统一到 token-only 口径
 
-> 对于“身份鉴权、sync/commits、配对/恢复/迁移”的当前口径，如与本仓库旧文档示例存在冲突，以本文为准。
+> 对于“身份鉴权、sync/commits、Web 只读查询、配对/恢复/迁移暂停”的当前口径，如与本仓库旧文档示例存在冲突，以本文为准。
 
 ## 2. 先说结论
 
@@ -27,9 +27,16 @@
 - `user_id` 不再是客户端前置输入，也不再参与请求鉴权
 - `user_id` 只作为只读缓存存在，且仅在首次同步成功后由服务端响应回填
 - `sync/commits` 顶层已移除 `user_id/device_id/writer_epoch`
-- 配对、恢复、迁移等受保护接口统一走 `Authorization: Bearer <token>`
+- Web 月/日汇总查询统一走 `Authorization: Bearer <token>`
 - 安卓设置页已移除 `user_id/device_id/writer_epoch` 可编辑输入
 - 安卓端对 `USER_ID_NOT_READY` 已统一提示“请先完成一次同步”
+
+另外，自 2026-03-14 起，后端当前阶段已暂停以下旧流程：
+
+- `pairing-code/*`
+- `recovery-code/*`
+- `web/read-bindings*`
+- `migrations/takeover` / `migrations/forced-takeover`
 
 另外：
 
@@ -54,16 +61,13 @@
 
 ### 3.2 受保护接口的统一鉴权方式
 
-以下接口，安卓端现在统一按 Bearer token 调用：
+以下当前有效接口，安卓端统一按 Bearer token 调用：
 
 - `POST /api/v1/sync/commits`
-- `POST /api/v1/pairing-code/query`
-- `POST /api/v1/pairing-code/reset`
-- `POST /api/v1/recovery-code/generate`
-- `POST /api/v1/recovery-code/reset`
 - `POST /api/v1/migrations/requests`
 - `POST /api/v1/migrations/confirm`
-- `POST /api/v1/migrations/takeover`
+- `POST /api/v1/web/month-summaries/query`
+- `POST /api/v1/web/day-summaries/query`
 
 统一请求规则：
 
@@ -76,6 +80,17 @@
 - `X-User-ID`
 - `X-Device-ID`
 - `X-Writer-Epoch`
+
+当前已暂停、不可再作为主流程的接口：
+
+- `POST /api/v1/pairing-code/query`
+- `POST /api/v1/pairing-code/reset`
+- `POST /api/v1/recovery-code/generate`
+- `POST /api/v1/recovery-code/reset`
+- `POST /api/v1/web/read-bindings`
+- `POST /api/v1/web/read-bindings/auth`
+- `POST /api/v1/migrations/takeover`
+- `POST /api/v1/migrations/forced-takeover`
 
 ## 4. API 端应实现或保持一致的契约
 
@@ -191,31 +206,44 @@
 
 对安卓端来说，这里的 `user_id` 是当前唯一有效回填来源。
 
-### 4.4 配对码 / 恢复码 / 迁移接口
+### 4.4 Web 只读查询
 
-安卓端当前约束：
+服务端当前行为要求：
 
-- 这些接口统一只走 Bearer token
-- 安卓端不再上传 `user_id/device_id/writer_epoch`
-
-服务端行为建议：
-
-- 通过 token 解析 `user_id`
+- 通过 `Authorization: Bearer <token>` 识别身份
+- 请求体仅保留查询参数：`year` 或 `month_start`
+- 可选 Header：`X-Client-Fingerprint`
 - 若 token 尚未绑定 `user_id`，统一返回：`409 USER_ID_NOT_READY`
+
+### 4.5 当前暂停能力
+
+后端当前阶段统一暂停；以下能力仅保留为 historical/paused 路径：
+
+- 配对码查询/重置
+- 恢复码生成/重置
+- Web binding 创建/鉴权
+- takeover / forced-takeover
+
+服务端行为要求：
+
+- 保留原路由
+- `POST` 统一返回 `410 FEATURE_PAUSED`
+- 不再把这些能力作为当前可用主流程
 
 建议错误响应：
 
 ```json
 {
-  "error_code": "USER_ID_NOT_READY",
-  "message": "user_id will be created after the first successful sync",
+  "error_code": "FEATURE_PAUSED",
+  "message": "this feature is paused in token-only mode",
   "request_id": "req_xxx"
 }
 ```
 
 安卓端现状：
 
-- 已经把这个错误统一提示为“请先完成一次同步”
+- 已经把 `USER_ID_NOT_READY` 统一提示为“请先完成一次同步”
+- 对已暂停接口，不再作为当前联调目标；若误调，应按 `410 FEATURE_PAUSED` 处理，而不是继续按有效主流程联调
 
 ## 5. 数据库兼容要求
 
@@ -275,9 +303,10 @@ API 端可以把下面这些视为“安卓侧已准备完成”：
 1. 确认 token-only 身份模型作为当前基线
 2. 提供或对齐 `/tokens/issue` 与 `/tokens/rotate`
 3. 调整 `/sync/commits` 为 token-only，且在首次成功同步回传 `user_id`
-4. 调整配对码、恢复码、迁移接口为 token-only
-5. 对匿名 token 的受保护接口调用统一返回 `USER_ID_NOT_READY`
-6. 在不改 DB 结构的前提下补齐兼容兜底逻辑
+4. 保持 Web 月/日汇总查询走 `Authorization: Bearer <mobile_token>`
+5. 保持 pairing/recovery/web binding/takeover 为 paused/historical，并统一返回 `410 FEATURE_PAUSED`
+6. 对当前仍有效的匿名 token 受保护接口调用统一返回 `USER_ID_NOT_READY`
+7. 在不改 DB 结构的前提下补齐兼容兜底逻辑
 
 ## 10. 来源文档
 

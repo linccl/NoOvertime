@@ -1,6 +1,6 @@
 # API 使用说明
 
-本文档用于本地联调与调用示例，当前已实现路由如下（以 `internal/api/server.go` 注册为准；其中 `/health` 与 `/api/v1/sync/commits` 提供详细示例，其余接口语义见 `docs/API契约草案.md`）：
+本文档用于本地联调与调用示例，当前有效路由如下（以 `internal/api/server.go` 注册为准；其中 `/health`、`/api/v1/sync/commits` 与 Web 只读查询提供详细示例，其余接口语义见 `docs/API契约草案.md`）：
 
 - `GET /health`
 - `POST /api/v1/tokens/issue`
@@ -8,21 +8,26 @@
 - `POST /api/v1/sync/commits`
 - `POST /api/v1/migrations/requests`
 - `POST /api/v1/migrations/{migration_request_id}/confirm`
-- `POST /api/v1/migrations/takeover`（兼容旧路径 `POST /api/v1/migrations/forced-takeover`）
+- `POST /api/v1/web/month-summaries/query`
+- `POST /api/v1/web/day-summaries/query`
+
+自 2026-03-14 起，以下旧流程已暂停，保留路由但统一返回 `410 FEATURE_PAUSED`：
+
+- `POST /api/v1/migrations/takeover`
+- `POST /api/v1/migrations/forced-takeover`
 - `POST /api/v1/pairing-code/query`
 - `POST /api/v1/pairing-code/reset`
 - `POST /api/v1/recovery-code/generate`
 - `POST /api/v1/recovery-code/reset`
 - `POST /api/v1/web/read-bindings`
 - `POST /api/v1/web/read-bindings/auth`
-- `POST /api/v1/web/month-summaries/query`
-- `POST /api/v1/web/day-summaries/query`
 
 ## 1. 通用约定
 
 - 请求 Content-Type：`application/json`（建议显式设置）。
 - 响应 Content-Type：`application/json; charset=utf-8`。
 - 移动端受保护接口统一使用 `Authorization: Bearer <token>`。
+- Web 月/日汇总查询同样使用 `Authorization: Bearer <mobile_token>`；请求体只保留查询参数，不再接受 `binding_token`。
 - 可选传入 `X-Client-Fingerprint`；`X-User-ID` / `X-Device-ID` / `X-Writer-Epoch` 已不再要求。
 - 支持传入 `X-Request-ID`；若未传入服务端会自动生成，并在响应头回显。
 - 所有错误响应都包含以下结构：
@@ -135,7 +140,49 @@ curl -i -X POST 'http://127.0.0.1:29082/api/v1/sync/commits' \
 }
 ```
 
-## 4. gate 字段语义
+## 4. Web 只读查询（token-only）
+
+### 4.1 `POST /api/v1/web/month-summaries/query`
+
+请求示例：
+
+```bash
+curl -i -X POST 'http://127.0.0.1:29082/api/v1/web/month-summaries/query' \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <mobile_token>' \
+  -H 'X-Request-ID: req-web-month-001' \
+  -d '{
+    "year": 2026
+  }'
+```
+
+补充约定：
+
+- 请求体只接受 `year`。
+- 可选传入 Header `X-Client-Fingerprint`。
+- 若 Bearer token 尚未绑定 `user_id`，返回 `409 USER_ID_NOT_READY`。
+
+### 4.2 `POST /api/v1/web/day-summaries/query`
+
+请求示例：
+
+```bash
+curl -i -X POST 'http://127.0.0.1:29082/api/v1/web/day-summaries/query' \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <mobile_token>' \
+  -H 'X-Request-ID: req-web-day-001' \
+  -d '{
+    "month_start": "2026-02-01"
+  }'
+```
+
+补充约定：
+
+- 请求体只接受 `month_start`，且必须是当月第一天。
+- 可选传入 Header `X-Client-Fingerprint`。
+- 不再支持 `binding_token` / `client_fingerprint` 请求体鉴权。
+
+## 5. gate 字段语义
 
 `gate_result`：
 
@@ -150,7 +197,7 @@ curl -i -X POST 'http://127.0.0.1:29082/api/v1/sync/commits' \
 - `LOW_OR_EQUAL_VERSION`
 - `SYNC_ID_CONFLICT`
 
-## 5. 主要错误码语义
+## 6. 主要错误码语义
 
 | error_code | 说明 |
 |---|---|
@@ -163,6 +210,7 @@ curl -i -X POST 'http://127.0.0.1:29082/api/v1/sync/commits' \
 | `TIME_PRECISION_INVALID` | 时间不是分钟精度 |
 | `TIME_FIELDS_MISMATCH` | `at_utc`/`timezone_id`/`local_date`/`minute_of_day` 不一致 |
 | `STALE_WRITER_REJECTED` | 非当前写入端（`device_id` 或 `writer_epoch` 过期） |
+| `FEATURE_PAUSED` | 旧配对/恢复/Web binding/takeover 流程已暂停，接口统一返回 HTTP 410 |
 
 补充说明：
 

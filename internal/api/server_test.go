@@ -283,29 +283,39 @@ func TestMigrationRoutesRejectNonPostWithUnifiedError(t *testing.T) {
 func TestMigrationRoutesRegisteredAndUseUnifiedWriteError(t *testing.T) {
 	server := NewServer("127.0.0.1:0", healthyDB{})
 	tests := []struct {
-		name string
-		path string
-		body string
+		name       string
+		path       string
+		body       string
+		wantStatus int
+		wantCode   string
 	}{
 		{
-			name: "requests",
-			path: "/api/v1/migrations/requests",
-			body: `{}`,
+			name:       "requests",
+			path:       "/api/v1/migrations/requests",
+			body:       `{}`,
+			wantStatus: http.StatusBadRequest,
+			wantCode:   invalidArgumentCode,
 		},
 		{
-			name: "confirm",
-			path: "/api/v1/migrations/f58e8ce4-1dba-4c4c-b5e0-d71ce357eb60/confirm",
-			body: `{}`,
+			name:       "confirm",
+			path:       "/api/v1/migrations/f58e8ce4-1dba-4c4c-b5e0-d71ce357eb60/confirm",
+			body:       `{}`,
+			wantStatus: http.StatusBadRequest,
+			wantCode:   invalidArgumentCode,
 		},
 		{
-			name: "takeover",
-			path: "/api/v1/migrations/takeover",
-			body: `{}`,
+			name:       "takeover",
+			path:       "/api/v1/migrations/takeover",
+			body:       `{}`,
+			wantStatus: http.StatusGone,
+			wantCode:   featurePausedCode,
 		},
 		{
-			name: "forced_takeover",
-			path: "/api/v1/migrations/forced-takeover",
-			body: `{}`,
+			name:       "forced_takeover",
+			path:       "/api/v1/migrations/forced-takeover",
+			body:       `{}`,
+			wantStatus: http.StatusGone,
+			wantCode:   featurePausedCode,
 		},
 	}
 
@@ -319,7 +329,7 @@ func TestMigrationRoutesRegisteredAndUseUnifiedWriteError(t *testing.T) {
 
 			server.httpServer.Handler.ServeHTTP(recorder, request)
 
-			if recorder.Code != http.StatusBadRequest {
+			if recorder.Code != tc.wantStatus {
 				t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
 			}
 
@@ -327,7 +337,7 @@ func TestMigrationRoutesRegisteredAndUseUnifiedWriteError(t *testing.T) {
 			if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 				t.Fatalf("decode response: %v", err)
 			}
-			if payload.ErrorCode != invalidArgumentCode {
+			if payload.ErrorCode != tc.wantCode {
 				t.Fatalf("error_code = %q", payload.ErrorCode)
 			}
 			if strings.TrimSpace(payload.Message) == "" {
@@ -433,12 +443,12 @@ func TestBatch2RoutesRegisteredAndUseUnifiedWriteError(t *testing.T) {
 		wantStatus int
 		wantCode   string
 	}{
-		{name: "pairing_query", path: pairingCodeQueryPath, wantStatus: http.StatusBadRequest, wantCode: invalidArgumentCode},
-		{name: "pairing_reset", path: pairingCodeResetPath, wantStatus: http.StatusBadRequest, wantCode: invalidArgumentCode},
-		{name: "recovery_generate", path: recoveryCodeGeneratePath, wantStatus: http.StatusBadRequest, wantCode: invalidArgumentCode},
-		{name: "recovery_reset", path: recoveryCodeResetPath, wantStatus: http.StatusBadRequest, wantCode: invalidArgumentCode},
-		{name: "web_read_bindings", path: webReadBindingsPath, wantStatus: http.StatusBadRequest, wantCode: invalidArgumentCode},
-		{name: "web_read_bindings_auth", path: webReadBindingsAuthPath, wantStatus: http.StatusBadRequest, wantCode: invalidArgumentCode},
+		{name: "pairing_query", path: pairingCodeQueryPath, wantStatus: http.StatusGone, wantCode: featurePausedCode},
+		{name: "pairing_reset", path: pairingCodeResetPath, wantStatus: http.StatusGone, wantCode: featurePausedCode},
+		{name: "recovery_generate", path: recoveryCodeGeneratePath, wantStatus: http.StatusGone, wantCode: featurePausedCode},
+		{name: "recovery_reset", path: recoveryCodeResetPath, wantStatus: http.StatusGone, wantCode: featurePausedCode},
+		{name: "web_read_bindings", path: webReadBindingsPath, wantStatus: http.StatusGone, wantCode: featurePausedCode},
+		{name: "web_read_bindings_auth", path: webReadBindingsAuthPath, wantStatus: http.StatusGone, wantCode: featurePausedCode},
 		{name: "web_month_summaries_query", path: webMonthSummariesQueryPath, wantStatus: http.StatusBadRequest, wantCode: invalidArgumentCode},
 		{name: "web_day_summaries_query", path: webDaySummariesQueryPath, wantStatus: http.StatusBadRequest, wantCode: invalidArgumentCode},
 	}

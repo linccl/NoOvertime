@@ -19,6 +19,7 @@ const (
 	rateLimitSceneRecoveryVerify   = "RECOVERY_VERIFY"
 	rateLimitScenePairingReset     = "PAIRING_RESET"
 	rateLimitSceneWebPairBind      = "WEB_PAIR_BIND"
+	rateLimitSceneWebReadQuery     = "WEB_READ_QUERY"
 )
 
 type migrationRateLimitPolicy struct {
@@ -85,6 +86,14 @@ func newMigrationRateGate() *migrationRateGate {
 				GlobalBlock:        72 * time.Hour,
 			},
 			rateLimitSceneWebPairBind: {
+				Window:             10 * time.Minute,
+				FineLimit:          5,
+				SubjectGlobalLimit: 15,
+				ClientGlobalLimit:  15,
+				FineBlock:          30 * time.Minute,
+				GlobalBlock:        2 * time.Hour,
+			},
+			rateLimitSceneWebReadQuery: {
 				Window:             10 * time.Minute,
 				FineLimit:          5,
 				SubjectGlobalLimit: 15,
@@ -206,4 +215,8 @@ func (s *Server) checkPairingResetRateLimit(subjectHash, clientFingerprintHash s
 
 func (s *Server) checkWebPairBindRateLimit(subjectHash, clientFingerprintHash string) error {
 	return s.migrationRateGate.Check(rateLimitSceneWebPairBind, subjectHash, clientFingerprintHash)
+}
+
+func (s *Server) checkWebReadQueryRateLimit(subjectHash, clientFingerprintHash string) error {
+	return s.migrationRateGate.Check(rateLimitSceneWebReadQuery, subjectHash, clientFingerprintHash)
 }

@@ -4,6 +4,8 @@
 > 任务：TASK-03（步骤2：API 契约草案）  
 > 基线文档：`docs/需求文档.md`、`docs/数据库方案草案.md`、`docs/实施计划.md`、`db/migrations/001_init.sql`、`docs/安卓端TokenOnly改造对API端总览.md`
 
+> 2026-03-14 更新：`/api/v1/pairing-code/*`、`/api/v1/recovery-code/*`、`/api/v1/web/read-bindings*`、`/api/v1/migrations/takeover*` 当前阶段已暂停，服务端保留路由但统一返回 `410 FEATURE_PAUSED`。`/api/v1/web/month-summaries/query` 与 `/api/v1/web/day-summaries/query` 已收敛为 `Authorization: Bearer <mobile_token>`。
+
 ## 1. 通用约定
 
 ### 1.1 基础信息
@@ -17,7 +19,7 @@
 
 - `BearerMobileToken`：移动端统一鉴权头，使用 `Authorization: Bearer <token>`；服务端从 token 解析 `user_id`（可为空）、内部 `device_id`、`writer_epoch` 与 `token_status`。
 - `WriterDeviceOnly`：必须是当前写入端；服务端使用 token 内部 `device_id/writer_epoch` 与 `users.writer_device_id/users.writer_epoch` 校验。
-- `WebBindingToken`：Web 只读令牌，请求体携带 `binding_token` + `client_fingerprint`。
+- `WebReadMobileToken`：Web 月/日汇总只读查询使用 `Authorization: Bearer <mobile_token>`；请求体仅携带查询参数，Header `X-Client-Fingerprint` 可选。
 - `AnonymousMobileToken`：仅 `tokens/*` 与 `sync/commits` 允许匿名 token；其余移动端受保护接口统一返回 `409 USER_ID_NOT_READY`。
 
 ### 1.3 通用错误响应
@@ -34,7 +36,8 @@
 
 | scene | 细粒度阈值 | 同主体全局阈值 | 终端全局阈值（MVP=同主体全局） | 阻断时长 |
 |---|---|---|---|---|
-| `WEB_PAIR_BIND` | 5 次 / 10 分钟 | 15 次 / 10 分钟 | 15 次 / 10 分钟 | 30 分钟（细粒度）/ 2 小时（全局） |
+| `WEB_PAIR_BIND` | 5 次 / 10 分钟 | 15 次 / 10 分钟 | 15 次 / 10 分钟 | 30 分钟（细粒度）/ 2 小时（全局，历史/已暂停流程） |
+| `WEB_READ_QUERY` | 5 次 / 10 分钟 | 15 次 / 10 分钟 | 15 次 / 10 分钟 | 30 分钟（细粒度）/ 2 小时（全局） |
 | `RECOVERY_VERIFY` | 3 次 / 24 小时 | 5 次 / 24 小时 | 5 次 / 24 小时 | 72 小时（细粒度）/ 7 天（全局） |
 | `MIGRATION_REQUEST` | 5 次 / 10 分钟 | 12 次 / 10 分钟 | 12 次 / 10 分钟 | 30 分钟（细粒度）/ 2 小时（全局） |
 | `MIGRATION_CONFIRM` | 6 次 / 10 分钟 | 15 次 / 10 分钟 | 15 次 / 10 分钟 | 30 分钟（细粒度）/ 2 小时（全局） |
@@ -48,7 +51,7 @@
 
 补充说明（MVP 实现细节）：
 
-- Web 侧接口：`client_fingerprint_hash` 来源为请求体字段 `client_fingerprint`。
+- Web 月/日汇总：`client_fingerprint_hash` 来源为 Header `X-Client-Fingerprint`；若缺省服务端会用当前 Bearer token 派生的内部 `device_id` 兜底。
 - 移动端写接口（迁移申请/确认/接管、配对码重置、恢复码生成/重置）：`client_fingerprint_hash` 来源为 Header `X-Client-Fingerprint`；若缺省服务端会用当前 Bearer token 派生的内部 `device_id` 兜底。
 
 ---
@@ -304,6 +307,8 @@
 
 ### 2.4 迁移接管（配对码 + 恢复码）
 
+当前状态：已暂停。`POST /api/v1/migrations/takeover` 与 `POST /api/v1/migrations/forced-takeover` 保留路由但统一返回 `410 FEATURE_PAUSED`。以下内容仅保留为历史设计留档。
+
 - Method & Path：优先 `POST /api/v1/migrations/takeover`；兼容旧路径 `POST /api/v1/migrations/forced-takeover`
 - 幂等字段：`N/A`
 - 鉴权要求：`BearerMobileToken`；请求体新口径仅需 `pairing_code` 与 `recovery_code`，`to_device_id` 从 token 派生；若兼容字段仍上传，必须与 token 派生值一致。匿名 token 统一返回 `409 USER_ID_NOT_READY`。
@@ -342,6 +347,8 @@
 
 ### 2.5 配对码查询（含首次生成）
 
+当前状态：已暂停。`POST /api/v1/pairing-code/query` 保留路由但统一返回 `410 FEATURE_PAUSED`。以下内容仅保留为历史设计留档。
+
 - Method & Path：`POST /api/v1/pairing-code/query`
 - 幂等字段：`N/A`
 - 鉴权要求：`BearerMobileToken + WriterDeviceOnly`；匿名 token 返回 `409 USER_ID_NOT_READY`。
@@ -374,6 +381,8 @@
 - `USER_NOT_FOUND`
 
 ### 2.6 配对码重置
+
+当前状态：已暂停。`POST /api/v1/pairing-code/reset` 保留路由但统一返回 `410 FEATURE_PAUSED`。以下内容仅保留为历史设计留档。
 
 - Method & Path：`POST /api/v1/pairing-code/reset`
 - 幂等字段：`N/A`
@@ -410,6 +419,8 @@
 
 ### 2.7 恢复码首次生成
 
+当前状态：已暂停。`POST /api/v1/recovery-code/generate` 保留路由但统一返回 `410 FEATURE_PAUSED`。以下内容仅保留为历史设计留档。
+
 - Method & Path：`POST /api/v1/recovery-code/generate`
 - 幂等字段：`N/A`
 - 鉴权要求：`BearerMobileToken + WriterDeviceOnly`；匿名 token 返回 `409 USER_ID_NOT_READY`。
@@ -443,6 +454,8 @@
 - `STALE_WRITER_REJECTED`
 
 ### 2.8 恢复码重置
+
+当前状态：已暂停。`POST /api/v1/recovery-code/reset` 保留路由但统一返回 `410 FEATURE_PAUSED`。以下内容仅保留为历史设计留档。
 
 - Method & Path：`POST /api/v1/recovery-code/reset`
 - 幂等字段：`N/A`
@@ -479,6 +492,8 @@
 
 ### 2.9 Web 只读绑定创建
 
+当前状态：已暂停。`POST /api/v1/web/read-bindings` 保留路由但统一返回 `410 FEATURE_PAUSED`。以下内容仅保留为历史设计留档。
+
 - Method & Path：`POST /api/v1/web/read-bindings`
 - 幂等字段：`N/A`
 - 鉴权要求：`Anonymous`
@@ -514,6 +529,8 @@
 - `WEB_BINDING_VERSION_MISMATCH`
 
 ### 2.10 Web 只读绑定鉴权
+
+当前状态：已暂停。`POST /api/v1/web/read-bindings/auth` 保留路由但统一返回 `410 FEATURE_PAUSED`。以下内容仅保留为历史设计留档。
 
 - Method & Path：`POST /api/v1/web/read-bindings/auth`
 - 幂等字段：`N/A`
@@ -552,15 +569,13 @@
 
 - Method & Path：`POST /api/v1/web/month-summaries/query`
 - 幂等字段：`N/A`
-- 鉴权要求：`WebBindingToken`（请求体携带 `binding_token` + `client_fingerprint`；禁止客户端自带 `user_id`）
-- 限流策略：`WEB_PAIR_BIND`
+- 鉴权要求：`WebReadMobileToken`（`Authorization: Bearer <mobile_token>`；禁止客户端自带 `user_id`）
+- 限流策略：`WEB_READ_QUERY`
 
 请求 JSON 示例：
 
 ```json
 {
-  "binding_token": "wrb_<binding_token>",
-  "client_fingerprint": "<client_fingerprint>",
   "year": 2026
 }
 ```
@@ -587,23 +602,20 @@
 - `RATE_LIMIT_BLOCKED`
 - `INVALID_ARGUMENT`
 - `UNKNOWN_FIELD`
-- `UNAUTHORIZED_WEB_TOKEN`
-- `WEB_BINDING_REACTIVATE_DENIED`
-- `WEB_BINDING_VERSION_MISMATCH`
+- `UNAUTHORIZED_MOBILE_TOKEN`
+- `USER_ID_NOT_READY`
 
 ### 2.12 Web 看板 DaySummary 查询（按月）
 
 - Method & Path：`POST /api/v1/web/day-summaries/query`
 - 幂等字段：`N/A`
-- 鉴权要求：`WebBindingToken`（请求体携带 `binding_token` + `client_fingerprint`；禁止客户端自带 `user_id`）
-- 限流策略：`WEB_PAIR_BIND`
+- 鉴权要求：`WebReadMobileToken`（`Authorization: Bearer <mobile_token>`；禁止客户端自带 `user_id`）
+- 限流策略：`WEB_READ_QUERY`
 
 请求 JSON 示例：
 
 ```json
 {
-  "binding_token": "wrb_<binding_token>",
-  "client_fingerprint": "<client_fingerprint>",
   "month_start": "2026-02-01"
 }
 ```
@@ -636,9 +648,8 @@
 - `RATE_LIMIT_BLOCKED`
 - `INVALID_ARGUMENT`
 - `UNKNOWN_FIELD`
-- `UNAUTHORIZED_WEB_TOKEN`
-- `WEB_BINDING_REACTIVATE_DENIED`
-- `WEB_BINDING_VERSION_MISMATCH`
+- `UNAUTHORIZED_MOBILE_TOKEN`
+- `USER_ID_NOT_READY`
 
 ---
 
@@ -648,16 +659,16 @@
 |---|---|---|
 | FR-008 | 缺 START 禁止 END | `2.1 同步上报` |
 | FR-016 | 打卡/请假变更自动同步并支持手动同步 | `2.1 同步上报` |
-| FR-021 | 配对码生成用于 Web 绑定 | `2.5 配对码查询（含首次生成）`、`2.9 Web 只读绑定创建` |
-| FR-022 | 配对码重置后旧码失效 | `2.6 配对码重置`、`2.9 Web 只读绑定创建` |
+| FR-021 | 配对码生成用于 Web 绑定 | 历史方案，当前阶段已暂停 |
+| FR-022 | 配对码重置后旧码失效 | 历史方案，当前阶段已暂停 |
 | FR-023 | 普通换机迁移（旧机确认） | `2.2 迁移申请`、`2.3 迁移确认` |
-| FR-026 | 恢复码生成 | `2.7 恢复码首次生成` |
-| FR-027 | 恢复码重置后旧码失效且新码仅展示一次 | `2.8 恢复码重置` |
-| FR-028 | 强制接管（配对码+恢复码） | `2.4 强制接管` |
+| FR-026 | 恢复码生成 | 历史方案，当前阶段已暂停 |
+| FR-027 | 恢复码重置后旧码失效且新码仅展示一次 | 历史方案，当前阶段已暂停 |
+| FR-028 | 强制接管（配对码+恢复码） | 历史方案，当前阶段已暂停 |
 | FR-029 | 删除打卡后重算并同步 | `2.1 同步上报`（载荷含删除态与重算结果） |
 | FR-031 | FULL_DAY 与 AUTO 打卡不可共存 | `2.1 同步上报` |
 | FR-032 | 分钟粒度存储与一致性校验 | `2.1 同步上报` |
-| FR-033 | MonthSummary 由移动端同步，Web 仅读取展示 | `2.1 同步上报`、`2.10 Web 只读绑定鉴权`（读取入口鉴权）、`2.11 Web 看板 MonthSummary 查询`、`2.12 Web 看板 DaySummary 查询` |
+| FR-033 | MonthSummary 由移动端同步，Web 仅读取展示 | `2.1 同步上报`、`2.11 Web 看板 MonthSummary 查询`、`2.12 Web 看板 DaySummary 查询` |
 
 ---
 

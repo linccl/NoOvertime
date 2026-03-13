@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	apperrors "noovertime/internal/errors"
@@ -15,15 +14,11 @@ import (
 )
 
 type webMonthSummariesQueryRequest struct {
-	BindingToken      string `json:"binding_token"`
-	ClientFingerprint string `json:"client_fingerprint"`
-	Year              *int   `json:"year"`
+	Year *int `json:"year"`
 }
 
 type webMonthSummariesQueryInput struct {
-	BindingToken      string
-	ClientFingerprint string
-	Year              int
+	Year int
 }
 
 type webMonthSummary struct {
@@ -39,8 +34,21 @@ type webMonthSummariesQueryResponse struct {
 	MonthSummaries []webMonthSummary `json:"month_summaries"`
 }
 
+type readOnlySummariesTxDB interface {
+	WithTx(ctx context.Context, fn func(tx pgx.Tx) error) error
+}
+
 func (s *Server) webMonthSummariesQueryHandler(w http.ResponseWriter, r *http.Request) error {
 	if err := ensurePostMethod(r); err != nil {
+		return err
+	}
+
+	header, err := parseMobileTokenHeaders(r)
+	if err != nil {
+		return err
+	}
+	auth, err := resolveMobileAuthContext(r.Context(), s.db, header, true)
+	if err != nil {
 		return err
 	}
 
@@ -49,12 +57,12 @@ func (s *Server) webMonthSummariesQueryHandler(w http.ResponseWriter, r *http.Re
 		return err
 	}
 
-	subjectHash := hashWebBindingToken(input.BindingToken)
-	if err := s.checkWebPairBindRateLimit(subjectHash, input.ClientFingerprint); err != nil {
+	fingerprint := migrationClientFingerprint(r, auth.DeviceID)
+	if err := s.checkWebReadQueryRateLimit(auth.UserID, fingerprint); err != nil {
 		return err
 	}
 
-	response, err := queryWebMonthSummaries(r.Context(), s.db, input)
+	response, err := queryWebMonthSummaries(r.Context(), s.db, auth.UserID, input)
 	if err != nil {
 		var apiErr apperrors.APIError
 		if errors.As(err, &apiErr) {
@@ -74,19 +82,6 @@ func parseWebMonthSummariesQueryBody(reader io.Reader) (webMonthSummariesQueryIn
 		return webMonthSummariesQueryInput{}, err
 	}
 
-	token := strings.TrimSpace(body.BindingToken)
-	if token == "" {
-		return webMonthSummariesQueryInput{}, invalidArgument("binding_token is required")
-	}
-	if !strings.HasPrefix(token, webBindingTokenPrefix) || len(token) <= len(webBindingTokenPrefix) {
-		return webMonthSummariesQueryInput{}, unauthorizedWebToken()
-	}
-
-	clientFingerprint := strings.TrimSpace(body.ClientFingerprint)
-	if clientFingerprint == "" {
-		return webMonthSummariesQueryInput{}, invalidArgument("client_fingerprint is required")
-	}
-
 	if body.Year == nil {
 		return webMonthSummariesQueryInput{}, invalidArgument("year is required")
 	}
@@ -96,18 +91,17 @@ func parseWebMonthSummariesQueryBody(reader io.Reader) (webMonthSummariesQueryIn
 	}
 
 	return webMonthSummariesQueryInput{
-		BindingToken:      token,
-		ClientFingerprint: clientFingerprint,
-		Year:              year,
+		Year: year,
 	}, nil
 }
 
 func queryWebMonthSummaries(
 	ctx context.Context,
 	db HealthChecker,
+	userID string,
 	input webMonthSummariesQueryInput,
 ) (webMonthSummariesQueryResponse, error) {
-	txDB, ok := db.(webReadBindingsTxDB)
+	txDB, ok := db.(readOnlySummariesTxDB)
 	if !ok {
 		return webMonthSummariesQueryResponse{}, errors.New("database transaction is not available")
 	}
@@ -120,11 +114,6 @@ func queryWebMonthSummaries(
 	end := time.Date(input.Year+1, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	err := txDB.WithTx(ctx, func(tx pgx.Tx) error {
-		userID, err := authenticateWebBindingReadOnlyAndTouchLastSeenAt(ctx, tx, input.BindingToken, input.ClientFingerprint)
-		if err != nil {
-			return err
-		}
-
 		const query = `
 SELECT id,
        month_start,

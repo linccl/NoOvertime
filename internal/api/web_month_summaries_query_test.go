@@ -15,22 +15,11 @@ import (
 )
 
 const validWebMonthSummariesQueryPayload = `{
-	"binding_token":"wrb_valid_binding_token",
-	"client_fingerprint":"9cfce7bcd5d6dfac2697fdf1f5b9f226",
 	"year":2026
 }`
 
 func TestWebMonthSummariesQueryRouteSuccess(t *testing.T) {
-	userID := "8d3c4d78-6c2b-4b56-a430-1e6b97f5b362"
 	db := &fakeWebMonthSummariesQueryDB{
-		credentialHash: hashWebBindingCredential("wrb_valid_binding_token", "9cfce7bcd5d6dfac2697fdf1f5b9f226"),
-		snapshot: webReadBindingsAuthSnapshot{
-			BindingID:                 "6f9c8306-5f7f-45d5-bf84-0a31f7066bd4",
-			UserID:                    userID,
-			Status:                    webBindingStatusActive,
-			BindingPairingCodeVersion: 4,
-			CurrentPairingCodeVersion: 4,
-		},
 		monthRows: [][]any{
 			{
 				"445f1f36-cf1c-4f90-9fd0-b56438e2df2e",
@@ -55,6 +44,7 @@ func TestWebMonthSummariesQueryRouteSuccess(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, webMonthSummariesQueryPath, strings.NewReader(validWebMonthSummariesQueryPayload))
 	req.Header.Set(requestIDHeader, "req-web-month-success")
+	setSyncAuthHeader(req, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -77,44 +67,31 @@ func TestWebMonthSummariesQueryRouteSuccess(t *testing.T) {
 	if body.MonthSummaries[1].MonthStart != "2026-03-01" {
 		t.Fatalf("month_start[1] = %q", body.MonthSummaries[1].MonthStart)
 	}
-
+	if db.lastResolvedToken != testSyncToken {
+		t.Fatalf("lastResolvedToken = %q", db.lastResolvedToken)
+	}
 	if db.withTxCalls != 1 {
 		t.Fatalf("withTxCalls = %d", db.withTxCalls)
 	}
 	if db.lastMonthQueryArgsLen != 3 {
 		t.Fatalf("month query args len = %d", db.lastMonthQueryArgsLen)
 	}
-	if db.lastMonthQueryUserID != userID {
+	if db.lastMonthQueryUserID != testUserID {
 		t.Fatalf("month query user_id = %q", db.lastMonthQueryUserID)
 	}
 	if db.lastMonthQueryStart != "2026-01-01" || db.lastMonthQueryEnd != "2027-01-01" {
 		t.Fatalf("month query range = [%s, %s)", db.lastMonthQueryStart, db.lastMonthQueryEnd)
 	}
-	if db.touchCalls != 1 {
-		t.Fatalf("touchCalls = %d", db.touchCalls)
-	}
-	if db.lastTouchBindingID != db.snapshot.BindingID {
-		t.Fatalf("lastTouchBindingID = %q", db.lastTouchBindingID)
-	}
 }
 
 func TestWebMonthSummariesQueryRouteEmpty(t *testing.T) {
-	db := &fakeWebMonthSummariesQueryDB{
-		credentialHash: hashWebBindingCredential("wrb_valid_binding_token", "9cfce7bcd5d6dfac2697fdf1f5b9f226"),
-		snapshot: webReadBindingsAuthSnapshot{
-			BindingID:                 "6f9c8306-5f7f-45d5-bf84-0a31f7066bd4",
-			UserID:                    "8d3c4d78-6c2b-4b56-a430-1e6b97f5b362",
-			Status:                    webBindingStatusActive,
-			BindingPairingCodeVersion: 4,
-			CurrentPairingCodeVersion: 4,
-		},
-		monthRows: [][]any{},
-	}
+	db := &fakeWebMonthSummariesQueryDB{}
 	server := NewServer("127.0.0.1:0", db)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, webMonthSummariesQueryPath, strings.NewReader(validWebMonthSummariesQueryPayload))
 	req.Header.Set(requestIDHeader, "req-web-month-empty")
+	setSyncAuthHeader(req, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -131,123 +108,41 @@ func TestWebMonthSummariesQueryRouteEmpty(t *testing.T) {
 	if len(body.MonthSummaries) != 0 {
 		t.Fatalf("month_summaries size = %d", len(body.MonthSummaries))
 	}
-	if db.touchCalls != 1 {
-		t.Fatalf("touchCalls = %d", db.touchCalls)
-	}
-	if db.lastTouchBindingID != db.snapshot.BindingID {
-		t.Fatalf("lastTouchBindingID = %q", db.lastTouchBindingID)
-	}
 }
 
 func TestWebMonthSummariesQueryRouteInvalid(t *testing.T) {
 	server := NewServer("127.0.0.1:0", healthyDB{})
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, webMonthSummariesQueryPath, strings.NewReader(`{
-		"binding_token":"wrb_valid_binding_token",
-		"client_fingerprint":"9cfce7bcd5d6dfac2697fdf1f5b9f226"
-	}`))
+	req := httptest.NewRequest(http.MethodPost, webMonthSummariesQueryPath, strings.NewReader(`{}`))
 	req.Header.Set(requestIDHeader, "req-web-month-invalid")
+	setSyncAuthHeader(req, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	assertErrorEnvelope(t, rec, http.StatusBadRequest, invalidArgumentCode, "req-web-month-invalid")
 }
 
-func TestWebMonthSummariesQueryRouteUnauthorizedWebToken(t *testing.T) {
-	tests := []struct {
-		name    string
-		payload string
-		db      *fakeWebMonthSummariesQueryDB
-	}{
-		{
-			name: "token format invalid",
-			payload: `{
-				"binding_token":"invalid-token",
-				"client_fingerprint":"9cfce7bcd5d6dfac2697fdf1f5b9f226",
-				"year":2026
-			}`,
-			db: &fakeWebMonthSummariesQueryDB{},
-		},
-		{
-			name:    "token not found",
-			payload: validWebMonthSummariesQueryPayload,
-			db: &fakeWebMonthSummariesQueryDB{
-				credentialHash: hashWebBindingCredential("wrb_other_token", "9cfce7bcd5d6dfac2697fdf1f5b9f226"),
-			},
-		},
-		{
-			name: "token fingerprint mismatch",
-			payload: `{
-				"binding_token":"wrb_valid_binding_token",
-				"client_fingerprint":"ffffffffffffffffffffffffffffffff",
-				"year":2026
-			}`,
-			db: &fakeWebMonthSummariesQueryDB{
-				credentialHash: hashWebBindingCredential("wrb_valid_binding_token", "9cfce7bcd5d6dfac2697fdf1f5b9f226"),
-			},
-		},
-	}
+func TestWebMonthSummariesQueryRouteUnauthorizedMobileToken(t *testing.T) {
+	server := NewServer("127.0.0.1:0", healthyDB{})
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			server := NewServer("127.0.0.1:0", tc.db)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, webMonthSummariesQueryPath, strings.NewReader(validWebMonthSummariesQueryPayload))
+	req.Header.Set(requestIDHeader, "req-web-month-unauthorized")
+	server.httpServer.Handler.ServeHTTP(rec, req)
 
-			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, webMonthSummariesQueryPath, strings.NewReader(tc.payload))
-			req.Header.Set(requestIDHeader, "req-web-month-unauthorized")
-			server.httpServer.Handler.ServeHTTP(rec, req)
-
-			assertErrorEnvelope(t, rec, http.StatusUnauthorized, unauthorizedWebTokenCode, "req-web-month-unauthorized")
-		})
-	}
+	assertErrorEnvelope(t, rec, http.StatusUnauthorized, unauthorizedMobileTokenCode, "req-web-month-unauthorized")
 }
 
-func TestWebMonthSummariesQueryRouteConflicts(t *testing.T) {
-	tests := []struct {
-		name     string
-		snapshot webReadBindingsAuthSnapshot
-		wantCode string
-	}{
-		{
-			name: "reactivate denied",
-			snapshot: webReadBindingsAuthSnapshot{
-				BindingID:                 "6f9c8306-5f7f-45d5-bf84-0a31f7066bd4",
-				UserID:                    "8d3c4d78-6c2b-4b56-a430-1e6b97f5b362",
-				Status:                    "REVOKED",
-				BindingPairingCodeVersion: 3,
-				CurrentPairingCodeVersion: 4,
-			},
-			wantCode: webBindingReactivateDeniedCode,
-		},
-		{
-			name: "version mismatch",
-			snapshot: webReadBindingsAuthSnapshot{
-				BindingID:                 "6f9c8306-5f7f-45d5-bf84-0a31f7066bd4",
-				UserID:                    "8d3c4d78-6c2b-4b56-a430-1e6b97f5b362",
-				Status:                    webBindingStatusActive,
-				BindingPairingCodeVersion: 3,
-				CurrentPairingCodeVersion: 4,
-			},
-			wantCode: webBindingVersionMismatchCode,
-		},
-	}
+func TestWebMonthSummariesQueryRouteUserIDNotReady(t *testing.T) {
+	server := NewServer("127.0.0.1:0", healthyDB{})
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			db := &fakeWebMonthSummariesQueryDB{
-				credentialHash: hashWebBindingCredential("wrb_valid_binding_token", "9cfce7bcd5d6dfac2697fdf1f5b9f226"),
-				snapshot:       tc.snapshot,
-			}
-			server := NewServer("127.0.0.1:0", db)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, webMonthSummariesQueryPath, strings.NewReader(validWebMonthSummariesQueryPayload))
+	req.Header.Set(requestIDHeader, "req-web-month-user-not-ready")
+	setSyncAuthHeader(req, testAnonymousSyncToken)
+	server.httpServer.Handler.ServeHTTP(rec, req)
 
-			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, webMonthSummariesQueryPath, strings.NewReader(validWebMonthSummariesQueryPayload))
-			req.Header.Set(requestIDHeader, "req-web-month-conflict")
-			server.httpServer.Handler.ServeHTTP(rec, req)
-
-			assertErrorEnvelope(t, rec, http.StatusConflict, tc.wantCode, "req-web-month-conflict")
-		})
-	}
+	assertErrorEnvelope(t, rec, http.StatusConflict, userIDNotReadyCode, "req-web-month-user-not-ready")
 }
 
 func TestWebMonthSummariesQueryRouteUnknownField(t *testing.T) {
@@ -255,12 +150,11 @@ func TestWebMonthSummariesQueryRouteUnknownField(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, webMonthSummariesQueryPath, strings.NewReader(`{
-		"binding_token":"wrb_valid_binding_token",
-		"client_fingerprint":"9cfce7bcd5d6dfac2697fdf1f5b9f226",
 		"year":2026,
-		"unknown":"x"
+		"binding_token":"legacy-token"
 	}`))
 	req.Header.Set(requestIDHeader, "req-web-month-unknown")
+	setSyncAuthHeader(req, testSyncToken)
 	server.httpServer.Handler.ServeHTTP(rec, req)
 
 	assertErrorEnvelope(t, rec, http.StatusBadRequest, unknownFieldCode, "req-web-month-unknown")
@@ -278,17 +172,13 @@ func TestWebMonthSummariesQueryRouteMethodNotAllowed(t *testing.T) {
 }
 
 type fakeWebMonthSummariesQueryDB struct {
-	credentialHash string
-	snapshot       webReadBindingsAuthSnapshot
-	monthRows      [][]any
-	loadErr        error
-	queryErr       error
-	lastSeenAt     time.Time
+	authErr     error
+	authContext mobileAuthContext
+	monthRows   [][]any
+	queryErr    error
 
 	withTxCalls           int
-	lastLookupHash        string
-	touchCalls            int
-	lastTouchBindingID    string
+	lastResolvedToken     string
 	lastMonthQueryArgsLen int
 	lastMonthQueryUserID  string
 	lastMonthQueryStart   string
@@ -297,6 +187,17 @@ type fakeWebMonthSummariesQueryDB struct {
 
 func (f *fakeWebMonthSummariesQueryDB) Health(context.Context) error {
 	return nil
+}
+
+func (f *fakeWebMonthSummariesQueryDB) resolveMobileAuthContextDirect(header mobileTokenHeader) (mobileAuthContext, error) {
+	f.lastResolvedToken = header.Token
+	if f.authErr != nil {
+		return mobileAuthContext{}, f.authErr
+	}
+	if f.authContext.Token != "" || f.authContext.UserID != "" || f.authContext.TokenStatus != "" {
+		return f.authContext, nil
+	}
+	return testMobileAuthContextForToken(header.Token), nil
 }
 
 func (f *fakeWebMonthSummariesQueryDB) WithTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
@@ -328,76 +229,33 @@ func (f *fakeWebMonthSummariesQueryTx) Exec(context.Context, string, ...any) (pg
 }
 
 func (f *fakeWebMonthSummariesQueryTx) Query(_ context.Context, query string, args ...any) (pgx.Rows, error) {
-	if strings.Contains(query, "FROM month_summaries") {
-		if !strings.Contains(query, "ORDER BY month_start ASC") {
-			return nil, errors.New("month summary query missing ORDER BY month_start ASC")
-		}
-		if f.db.queryErr != nil {
-			return nil, f.db.queryErr
-		}
-		f.db.lastMonthQueryArgsLen = len(args)
-		if len(args) >= 3 {
-			if v, ok := args[0].(string); ok {
-				f.db.lastMonthQueryUserID = v
-			}
-			if v, ok := args[1].(string); ok {
-				f.db.lastMonthQueryStart = v
-			}
-			if v, ok := args[2].(string); ok {
-				f.db.lastMonthQueryEnd = v
-			}
-		}
-		return newFakeRows(f.db.monthRows), nil
+	if !strings.Contains(query, "FROM month_summaries") {
+		return nil, errors.New("unexpected query: " + query)
 	}
-	return nil, errors.New("unexpected query: " + query)
+	if !strings.Contains(query, "ORDER BY month_start ASC") {
+		return nil, errors.New("month summary query missing ORDER BY month_start ASC")
+	}
+	if f.db.queryErr != nil {
+		return nil, f.db.queryErr
+	}
+	f.db.lastMonthQueryArgsLen = len(args)
+	if len(args) >= 3 {
+		if v, ok := args[0].(string); ok {
+			f.db.lastMonthQueryUserID = v
+		}
+		if v, ok := args[1].(string); ok {
+			f.db.lastMonthQueryStart = v
+		}
+		if v, ok := args[2].(string); ok {
+			f.db.lastMonthQueryEnd = v
+		}
+	}
+	return newFakeRows(f.db.monthRows), nil
 }
 
-func (f *fakeWebMonthSummariesQueryTx) QueryRow(_ context.Context, query string, args ...any) pgx.Row {
-	switch {
-	case strings.Contains(query, "FROM web_read_bindings b") && strings.Contains(query, "WHERE b.token_hash = $1"):
-		return fakeWebReadBindingsAuthRow{scanFn: func(dest ...any) error {
-			if f.db.loadErr != nil {
-				return f.db.loadErr
-			}
-			if len(args) >= 1 {
-				if tokenHash, ok := args[0].(string); ok {
-					f.db.lastLookupHash = tokenHash
-					if f.db.credentialHash != "" && tokenHash != f.db.credentialHash {
-						return pgx.ErrNoRows
-					}
-				}
-			}
-			if len(dest) != 5 {
-				return errors.New("invalid destination fields for auth snapshot")
-			}
-			*dest[0].(*string) = f.db.snapshot.BindingID
-			*dest[1].(*string) = f.db.snapshot.UserID
-			*dest[2].(*string) = f.db.snapshot.Status
-			*dest[3].(*int64) = f.db.snapshot.BindingPairingCodeVersion
-			*dest[4].(*int64) = f.db.snapshot.CurrentPairingCodeVersion
-			return nil
-		}}
-	case strings.Contains(query, "UPDATE web_read_bindings") && strings.Contains(query, "SET last_seen_at = now()"):
-		return fakeWebReadBindingsAuthRow{scanFn: func(dest ...any) error {
-			f.db.touchCalls++
-			if len(args) >= 1 {
-				if bindingID, ok := args[0].(string); ok {
-					f.db.lastTouchBindingID = bindingID
-				}
-			}
-			if len(dest) != 1 {
-				return errors.New("invalid destination fields for last_seen_at")
-			}
-			lastSeenAtPtr, ok := dest[0].(*time.Time)
-			if !ok {
-				return errors.New("dest[0] must be *time.Time")
-			}
-			*lastSeenAtPtr = f.db.lastSeenAt
-			return nil
-		}}
-	}
-	return fakeWebReadBindingsAuthRow{scanFn: func(dest ...any) error {
-		return errors.New("unexpected query: " + query)
+func (f *fakeWebMonthSummariesQueryTx) QueryRow(context.Context, string, ...any) pgx.Row {
+	return fakePGXRow{scanFn: func(dest ...any) error {
+		return errors.New("unexpected query row call")
 	}}
 }
 
