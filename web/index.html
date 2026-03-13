@@ -215,7 +215,6 @@
 
       const storageKeys = {
         fingerprint: "noovertime_client_fingerprint",
-        mobileToken: "noovertime_mobile_token",
       };
 
       function $(id) {
@@ -393,7 +392,7 @@
 
       function syncUIFromStorage() {
         $("fingerprint").value = loadOrInitFingerprint();
-        $("mobileToken").value = (localStorage.getItem(storageKeys.mobileToken) || "").trim();
+        $("mobileToken").value = "";
         $("year").value = String(nowYear());
       }
 
@@ -404,7 +403,6 @@
         if (!token) return setErrorOutput("mobile_token is required");
         if (!Number.isFinite(year) || year < 1970 || year > 2100) return setErrorOutput("year is invalid");
 
-        localStorage.setItem(storageKeys.mobileToken, token);
         if (fingerprint) localStorage.setItem(storageKeys.fingerprint, fingerprint);
         else localStorage.removeItem(storageKeys.fingerprint);
 
@@ -441,7 +439,6 @@
         if (!token) return setErrorOutput("mobile_token is required");
         if (!monthStart) return setErrorOutput("month_start is required");
 
-        localStorage.setItem(storageKeys.mobileToken, token);
         if (fingerprint) localStorage.setItem(storageKeys.fingerprint, fingerprint);
         else localStorage.removeItem(storageKeys.fingerprint);
 
@@ -471,18 +468,11 @@
         });
 
         $("clearToken").addEventListener("click", () => {
-          localStorage.removeItem(storageKeys.mobileToken);
           $("mobileToken").value = "";
         });
 
         $("monthQueryBtn").addEventListener("click", handleMonthQuery);
         $("dayQueryBtn").addEventListener("click", handleDayQuery);
-
-        $("mobileToken").addEventListener("change", () => {
-          const value = $("mobileToken").value.trim();
-          if (value) localStorage.setItem(storageKeys.mobileToken, value);
-          else localStorage.removeItem(storageKeys.mobileToken);
-        });
         $("fingerprint").addEventListener("change", () => {
           const value = $("fingerprint").value.trim();
           if (value) localStorage.setItem(storageKeys.fingerprint, value);
