@@ -1,0 +1,9 @@
+ _reset_base_data 
+------------------
+ 
+(1 row)
+
+INSERT 0 1
+ERROR:  P0001: [error_key=MIGRATION_TRANSITION_INVALID] migration request expired at 2026-02-28 18:15:34.417535+00, cannot move to CONFIRMED
+CONTEXT:  PL/pgSQL function enforce_migration_status_transition() line 67 at RAISE
+LOCATION:  exec_stmt_raise, pl_exec.c:3923
