@@ -254,7 +254,7 @@
       }
 
       function setOutput(payload) {
-        $("output").textContent = JSON.stringify(payload, null, 2);
+        $("output").textContent = JSON.stringify(sanitizeForOutput(payload), null, 2);
       }
 
       function setErrorOutput(message, detail) {
@@ -272,6 +272,51 @@
         return headers;
       }
 
+      function redactBearerToken(value) {
+        if (typeof value !== "string") return value;
+        return value.startsWith("Bearer ") ? "Bearer [REDACTED]" : value;
+      }
+
+      function sanitizeHeaders(headers) {
+        if (!headers || typeof headers !== "object" || Array.isArray(headers)) return headers;
+        const next = {};
+        for (const [key, value] of Object.entries(headers)) {
+          next[key] = key.toLowerCase() === "authorization" ? redactBearerToken(value) : value;
+        }
+        return next;
+      }
+
+      function sanitizeForOutput(value, key = "") {
+        if (Array.isArray(value)) {
+          return value.map((item) => sanitizeForOutput(item));
+        }
+        if (value && typeof value === "object") {
+          const next = {};
+          for (const [childKey, childValue] of Object.entries(value)) {
+            if (childKey.toLowerCase() === "headers" || childKey.toLowerCase() === "request_headers") {
+              next[childKey] = sanitizeHeaders(childValue);
+            } else {
+              next[childKey] = sanitizeForOutput(childValue, childKey);
+            }
+          }
+          return next;
+        }
+        if (typeof value === "string") {
+          if (key.toLowerCase() === "authorization") return redactBearerToken(value);
+          if (/(^|_)token$/i.test(key) || /^mobiletoken$/i.test(key)) return "[REDACTED]";
+          return redactBearerToken(value);
+        }
+        return value;
+      }
+
+      function buildOutputRequest(path, headers, body) {
+        return {
+          path,
+          headers: sanitizeHeaders(headers),
+          body,
+        };
+      }
+
       async function postJSON(path, body, token, fingerprint) {
         const headers = buildHeaders(token, fingerprint);
         const response = await fetch(path, {
@@ -286,7 +331,6 @@
           ok: response.ok,
           status: response.status,
           status_text: response.statusText,
-          request_headers: headers,
           data,
         };
       }
@@ -367,11 +411,12 @@
         const path = "/api/v1/web/month-summaries/query";
         const body = { year };
         const headers = buildHeaders(token, fingerprint);
-        setOutput({ request: { path, headers, body } });
+        const outputRequest = buildOutputRequest(path, headers, body);
+        setOutput({ request: outputRequest });
 
         try {
           const result = await postJSON(path, body, token, fingerprint);
-          setOutput({ request: { path, headers, body }, response: result });
+          setOutput({ request: outputRequest, response: result });
 
           const months =
             result && result.data && typeof result.data === "object" ? result.data.month_summaries : null;
@@ -403,11 +448,12 @@
         const path = "/api/v1/web/day-summaries/query";
         const body = { month_start: monthStart };
         const headers = buildHeaders(token, fingerprint);
-        setOutput({ request: { path, headers, body } });
+        const outputRequest = buildOutputRequest(path, headers, body);
+        setOutput({ request: outputRequest });
 
         try {
           const result = await postJSON(path, body, token, fingerprint);
-          setOutput({ request: { path, headers, body }, response: result });
+          setOutput({ request: outputRequest, response: result });
 
           const days =
             result && result.data && typeof result.data === "object" ? result.data.day_summaries : null;
