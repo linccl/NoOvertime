@@ -33,7 +33,9 @@ NoOvertime 后端服务（Go + PostgreSQL），当前有效核心接口如下：
 
 ```bash
 createdb no_overtime
-psql -d no_overtime -f db/migrations/001_init.sql
+for f in db/migrations/*.sql; do
+  psql -d no_overtime -f "$f"
+done
 ```
 
 ### 3. 配置环境变量

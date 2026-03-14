@@ -14,7 +14,8 @@ RUN_DB="no_overtime_task04_pg18"
 ROLLBACK_DB="no_overtime_task04_pg18_rb"
 ALLOW_NON_PG18=0
 CASE_SQL="$REPO_ROOT/db/validation/db_live_cases.sql"
-MIGRATION_SQL="$REPO_ROOT/db/migrations/001_init.sql"
+MIGRATION_DIR="$REPO_ROOT/db/migrations"
+BASE_MIGRATION_SQL="$REPO_ROOT/db/migrations/001_init.sql"
 WORKDIR=""
 
 usage() {
@@ -114,8 +115,19 @@ ensure_identifier "$ADMIN_DB" "admin-db"
 ensure_identifier "$RUN_DB" "run-db"
 ensure_identifier "$ROLLBACK_DB" "rollback-db"
 
-if [[ ! -f "$MIGRATION_SQL" ]]; then
-  echo "Migration file not found: $MIGRATION_SQL" >&2
+if [[ ! -d "$MIGRATION_DIR" ]]; then
+  echo "Migration directory not found: $MIGRATION_DIR" >&2
+  exit 2
+fi
+
+if [[ ! -f "$BASE_MIGRATION_SQL" ]]; then
+  echo "Base migration file not found: $BASE_MIGRATION_SQL" >&2
+  exit 2
+fi
+
+mapfile -t MIGRATION_FILES < <(find "$MIGRATION_DIR" -maxdepth 1 -type f -name '*.sql' | sort)
+if (( ${#MIGRATION_FILES[@]} == 0 )); then
+  echo "No migration files found under: $MIGRATION_DIR" >&2
   exit 2
 fi
 
@@ -141,6 +153,16 @@ dsn_for_db() {
   local db="$1"
   printf 'host=%s port=%s dbname=%s user=%s sslmode=%s connect_timeout=%s' \
     "$HOST" "$PORT" "$db" "$USER_NAME" "$SSLMODE" "$CONNECT_TIMEOUT"
+}
+
+run_all_migrations() {
+  local dsn="$1"
+  shift || true
+
+  local migration
+  for migration in "${MIGRATION_FILES[@]}"; do
+    psql "$dsn" -X -v ON_ERROR_STOP=1 "$@" -f "$migration"
+  done
 }
 
 ADMIN_DSN="$(dsn_for_db "$ADMIN_DB")"
@@ -244,11 +266,11 @@ SQL
 psql "$RUN_DSN" -X -v ON_ERROR_STOP=1 -f "$EMPTY_CHECK_SQL_FILE" >"$WORKDIR/09_precheck_empty_db.out" 2>&1
 
 log "Step 4/8: first migration run"
-psql "$RUN_DSN" -X -v ON_ERROR_STOP=1 -f "$MIGRATION_SQL" >"$WORKDIR/10_migration_first_run.out" 2>&1
+run_all_migrations "$RUN_DSN" >"$WORKDIR/10_migration_first_run.out" 2>&1
 
 log "Step 5/8: second migration run expected failure"
 set +e
-psql "$RUN_DSN" -X --set=VERBOSITY=verbose -v ON_ERROR_STOP=1 -f "$MIGRATION_SQL" >"$WORKDIR/11_migration_second_run.out" 2>&1
+run_all_migrations "$RUN_DSN" --set=VERBOSITY=verbose >"$WORKDIR/11_migration_second_run.out" 2>&1
 SECOND_RC=$?
 set -e
 if (( SECOND_RC == 0 )); then
@@ -261,7 +283,7 @@ if ! grep -q "ERROR:  42710" "$WORKDIR/11_migration_second_run.out"; then
 fi
 
 log "Step 6/8: rollback drill expected failure + clean check"
-awk '{if($0=="COMMIT;"){print "SELECT * FROM __force_failure_relation_not_exists__;"} print}' "$MIGRATION_SQL" >"$WORKDIR/001_init_fail_before_commit.sql"
+awk '{if($0=="COMMIT;"){print "SELECT * FROM __force_failure_relation_not_exists__;"} print}' "$BASE_MIGRATION_SQL" >"$WORKDIR/001_init_fail_before_commit.sql"
 set +e
 psql "$RB_DSN" -X --set=VERBOSITY=verbose -v ON_ERROR_STOP=1 -f "$WORKDIR/001_init_fail_before_commit.sql" >"$WORKDIR/12_rollback_drill_run.out" 2>&1
 RB_RC=$?
@@ -286,9 +308,9 @@ psql "$RUN_DSN" -X -v ON_ERROR_STOP=1 >"$WORKDIR/14_object_counts.out" 2>&1 <<'S
 WITH core_enums AS (
   SELECT unnest(ARRAY['punch_type','punch_source','leave_type','device_status','migration_mode','migration_status','summary_status','security_scene']) AS name
 ), core_tables AS (
-  SELECT unnest(ARRAY['users','devices','punch_records','leave_records','day_summaries','month_summaries','migration_requests','security_attempt_windows','sync_commits','web_read_bindings']) AS name
+  SELECT unnest(ARRAY['users','devices','punch_records','leave_records','day_summaries','month_summaries','migration_requests','security_attempt_windows','sync_commits','mobile_tokens','web_read_bindings']) AS name
 ), core_indexes AS (
-  SELECT unnest(ARRAY['idx_devices_user_status','uk_punch_active_unique','idx_punch_user_date','idx_punch_user_updated','uk_leave_active_unique','idx_leave_user_date','uk_day_summary_user_date','idx_day_summary_user_date','uk_month_summary_user_month','idx_month_summary_user_month','idx_migration_user_status','uk_migration_user_pending','idx_security_blocked_until','idx_sync_commits_user_created','idx_web_binding_user_status']) AS name
+  SELECT unnest(ARRAY['idx_devices_user_status','uk_punch_active_unique','idx_punch_user_date','idx_punch_user_updated','uk_leave_active_unique','idx_leave_user_date','uk_day_summary_user_date','idx_day_summary_user_date','uk_month_summary_user_month','idx_month_summary_user_month','idx_migration_user_status','uk_migration_user_pending','idx_security_blocked_until','idx_sync_commits_user_created','uq_mobile_tokens_active_user','idx_web_binding_user_status']) AS name
 ), core_functions AS (
   SELECT unnest(ARRAY['validate_punch_pair','revoke_web_bindings_on_pairing_change','rotate_pairing_code','enforce_migration_status_transition','validate_web_binding_version','validate_sync_commit_writer','normalize_security_window_start','validate_auto_punch_not_on_full_day_leave','validate_full_day_leave_without_auto_punch','validate_record_user_id_immutable']) AS name
 ), core_triggers AS (
