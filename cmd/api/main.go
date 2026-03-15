@@ -7,6 +7,7 @@ import (
 	"noovertime/config"
 	"noovertime/internal/api"
 	"noovertime/internal/db"
+	"noovertime/internal/storage"
 )
 
 func main() {
@@ -33,7 +34,26 @@ func main() {
 	}
 	defer dbClient.Close()
 
-	server := api.NewServer(cfg.HTTPAddr, dbClient)
+	objectStore, localUploadDir, err := storage.NewStore(storage.Options{
+		Backend:            cfg.UploadStorageBackend,
+		LocalDir:           cfg.UploadLocalDir,
+		PublicBaseURL:      cfg.UploadPublicBaseURL,
+		OSSEndpoint:        cfg.UploadOSSEndpoint,
+		OSSBucket:          cfg.UploadOSSBucket,
+		OSSAccessKeyID:     cfg.UploadOSSAccessKeyID,
+		OSSAccessKeySecret: cfg.UploadOSSAccessKeySecret,
+		OSSPrefix:          cfg.UploadOSSPrefix,
+	})
+	if err != nil {
+		log.Fatalf("init upload storage: %v", err)
+	}
+
+	server := api.NewServer(
+		cfg.HTTPAddr,
+		dbClient,
+		api.WithObjectStore(objectStore),
+		api.WithLocalUploadDir(localUploadDir),
+	)
 	if err := server.Run(); err != nil {
 		log.Fatalf("run server: %v", err)
 	}

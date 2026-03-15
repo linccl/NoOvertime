@@ -483,3 +483,23 @@ func TestBatch2RoutesRegisteredAndUseUnifiedWriteError(t *testing.T) {
 		})
 	}
 }
+
+func TestUploadRoutesNotRegisteredWithoutObjectStore(t *testing.T) {
+	server := NewServer("127.0.0.1:0", healthyDB{})
+
+	tests := []string{
+		punchPhotoUploadPath,
+		logUploadPath,
+	}
+
+	for _, route := range tests {
+		request := httptest.NewRequest(http.MethodPost, route, strings.NewReader(`{}`))
+		recorder := httptest.NewRecorder()
+
+		server.httpServer.Handler.ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("route=%s status=%d body=%s", route, recorder.Code, recorder.Body.String())
+		}
+	}
+}

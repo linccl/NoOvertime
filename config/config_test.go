@@ -17,7 +17,14 @@ func TestLoadFromConfigFile(t *testing.T) {
 		"db_pool_max_conns": 20,
 		"db_pool_min_conns": 2,
 		"db_pool_max_lifetime_sec": 7200,
-		"db_pool_max_idle_sec": 600
+		"db_pool_max_idle_sec": 600,
+		"upload_storage_backend": "oss",
+		"upload_public_base_url": "https://cdn.example.com/noovertime",
+		"upload_oss_endpoint": "https://oss-cn-hangzhou.aliyuncs.com",
+		"upload_oss_bucket": "noovertime-test",
+		"upload_oss_access_key_id": "ak",
+		"upload_oss_access_key_secret": "sk",
+		"upload_oss_prefix": "prod/mobile"
 	}`)
 	t.Setenv("CONFIG_FILE", configPath)
 
@@ -41,6 +48,15 @@ func TestLoadFromConfigFile(t *testing.T) {
 	if cfg.DBPoolMaxLifetimeSec != 7200 || cfg.DBPoolMaxIdleTimeSec != 600 {
 		t.Fatalf("pool lifetime/idle = %d/%d", cfg.DBPoolMaxLifetimeSec, cfg.DBPoolMaxIdleTimeSec)
 	}
+	if cfg.UploadStorageBackend != "oss" {
+		t.Fatalf("UploadStorageBackend = %q", cfg.UploadStorageBackend)
+	}
+	if cfg.UploadPublicBaseURL != "https://cdn.example.com/noovertime" {
+		t.Fatalf("UploadPublicBaseURL = %q", cfg.UploadPublicBaseURL)
+	}
+	if cfg.UploadOSSPrefix != "prod/mobile" {
+		t.Fatalf("UploadOSSPrefix = %q", cfg.UploadOSSPrefix)
+	}
 }
 
 func TestLoadEnvOverridesConfigFile(t *testing.T) {
@@ -60,6 +76,8 @@ func TestLoadEnvOverridesConfigFile(t *testing.T) {
 	t.Setenv("LOG_LEVEL", "warn")
 	t.Setenv("DATABASE_DSN", "postgres://env:env@localhost:5432/noovertime?sslmode=disable")
 	t.Setenv("DB_POOL_MAX_CONNS", "25")
+	t.Setenv("UPLOAD_STORAGE_BACKEND", "local")
+	t.Setenv("UPLOAD_LOCAL_DIR", "/tmp/noovertime-uploads")
 
 	cfg, err := Load()
 	if err != nil {
@@ -77,6 +95,12 @@ func TestLoadEnvOverridesConfigFile(t *testing.T) {
 	}
 	if cfg.DBPoolMaxConns != 25 {
 		t.Fatalf("DBPoolMaxConns = %d", cfg.DBPoolMaxConns)
+	}
+	if cfg.UploadStorageBackend != "local" {
+		t.Fatalf("UploadStorageBackend = %q", cfg.UploadStorageBackend)
+	}
+	if cfg.UploadLocalDir != "/tmp/noovertime-uploads" {
+		t.Fatalf("UploadLocalDir = %q", cfg.UploadLocalDir)
 	}
 }
 
@@ -139,6 +163,22 @@ func TestLoadRejectsInvalidIntEnv(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsIncompleteOSSConfig(t *testing.T) {
+	clearConfigEnvs(t)
+
+	t.Setenv("DATABASE_DSN", "postgres://user:pass@localhost:5432/noovertime?sslmode=disable")
+	t.Setenv("UPLOAD_STORAGE_BACKEND", "oss")
+	t.Setenv("UPLOAD_OSS_ENDPOINT", "https://oss-cn-hangzhou.aliyuncs.com")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "UPLOAD_OSS_BUCKET is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func clearConfigEnvs(t *testing.T) {
 	t.Helper()
 	keys := []string{
@@ -150,6 +190,14 @@ func clearConfigEnvs(t *testing.T) {
 		"DB_POOL_MIN_CONNS",
 		"DB_POOL_MAX_LIFETIME_SEC",
 		"DB_POOL_MAX_IDLE_SEC",
+		"UPLOAD_STORAGE_BACKEND",
+		"UPLOAD_LOCAL_DIR",
+		"UPLOAD_PUBLIC_BASE_URL",
+		"UPLOAD_OSS_ENDPOINT",
+		"UPLOAD_OSS_BUCKET",
+		"UPLOAD_OSS_ACCESS_KEY_ID",
+		"UPLOAD_OSS_ACCESS_KEY_SECRET",
+		"UPLOAD_OSS_PREFIX",
 	}
 	for _, key := range keys {
 		t.Setenv(key, "")

@@ -17,6 +17,8 @@ const (
 	defaultDBPoolMinConns       = 1
 	defaultDBPoolMaxLifetimeSec = 3600
 	defaultDBPoolMaxIdleSec     = 300
+	defaultUploadStorageBackend = "local"
+	defaultUploadLocalDir       = "./uploads-data"
 )
 
 // Config is the minimal application configuration for bootstrap.
@@ -28,6 +30,14 @@ type Config struct {
 	DBPoolMinConns       int
 	DBPoolMaxLifetimeSec int
 	DBPoolMaxIdleTimeSec int
+	UploadStorageBackend string
+	UploadLocalDir       string
+	UploadPublicBaseURL  string
+	UploadOSSEndpoint    string
+	UploadOSSBucket      string
+	UploadOSSAccessKeyID string
+	UploadOSSAccessKeySecret string
+	UploadOSSPrefix      string
 }
 
 type fileConfig struct {
@@ -38,6 +48,14 @@ type fileConfig struct {
 	DBPoolMinConns       *int    `json:"db_pool_min_conns"`
 	DBPoolMaxLifetimeSec *int    `json:"db_pool_max_lifetime_sec"`
 	DBPoolMaxIdleSec     *int    `json:"db_pool_max_idle_sec"`
+	UploadStorageBackend *string `json:"upload_storage_backend"`
+	UploadLocalDir       *string `json:"upload_local_dir"`
+	UploadPublicBaseURL  *string `json:"upload_public_base_url"`
+	UploadOSSEndpoint    *string `json:"upload_oss_endpoint"`
+	UploadOSSBucket      *string `json:"upload_oss_bucket"`
+	UploadOSSAccessKeyID *string `json:"upload_oss_access_key_id"`
+	UploadOSSAccessKeySecret *string `json:"upload_oss_access_key_secret"`
+	UploadOSSPrefix      *string `json:"upload_oss_prefix"`
 }
 
 // Load reads configuration from config file first, then environment variables.
@@ -49,6 +67,8 @@ func Load() (Config, error) {
 		DBPoolMinConns:       defaultDBPoolMinConns,
 		DBPoolMaxLifetimeSec: defaultDBPoolMaxLifetimeSec,
 		DBPoolMaxIdleTimeSec: defaultDBPoolMaxIdleSec,
+		UploadStorageBackend: defaultUploadStorageBackend,
+		UploadLocalDir:       defaultUploadLocalDir,
 	}
 
 	if configPath, ok := getNonEmptyEnv("CONFIG_FILE"); ok {
@@ -113,6 +133,30 @@ func applyFileConfig(cfg *Config, raw fileConfig) {
 	if raw.DBPoolMaxIdleSec != nil {
 		cfg.DBPoolMaxIdleTimeSec = *raw.DBPoolMaxIdleSec
 	}
+	if raw.UploadStorageBackend != nil {
+		cfg.UploadStorageBackend = strings.ToLower(strings.TrimSpace(*raw.UploadStorageBackend))
+	}
+	if raw.UploadLocalDir != nil {
+		cfg.UploadLocalDir = strings.TrimSpace(*raw.UploadLocalDir)
+	}
+	if raw.UploadPublicBaseURL != nil {
+		cfg.UploadPublicBaseURL = strings.TrimSpace(*raw.UploadPublicBaseURL)
+	}
+	if raw.UploadOSSEndpoint != nil {
+		cfg.UploadOSSEndpoint = strings.TrimSpace(*raw.UploadOSSEndpoint)
+	}
+	if raw.UploadOSSBucket != nil {
+		cfg.UploadOSSBucket = strings.TrimSpace(*raw.UploadOSSBucket)
+	}
+	if raw.UploadOSSAccessKeyID != nil {
+		cfg.UploadOSSAccessKeyID = strings.TrimSpace(*raw.UploadOSSAccessKeyID)
+	}
+	if raw.UploadOSSAccessKeySecret != nil {
+		cfg.UploadOSSAccessKeySecret = strings.TrimSpace(*raw.UploadOSSAccessKeySecret)
+	}
+	if raw.UploadOSSPrefix != nil {
+		cfg.UploadOSSPrefix = strings.TrimSpace(*raw.UploadOSSPrefix)
+	}
 }
 
 func applyEnvOverrides(cfg *Config) error {
@@ -124,6 +168,30 @@ func applyEnvOverrides(cfg *Config) error {
 	}
 	if value, ok := getNonEmptyEnv("DATABASE_DSN"); ok {
 		cfg.DatabaseDSN = strings.TrimSpace(value)
+	}
+	if value, ok := getNonEmptyEnv("UPLOAD_STORAGE_BACKEND"); ok {
+		cfg.UploadStorageBackend = strings.ToLower(strings.TrimSpace(value))
+	}
+	if value, ok := getNonEmptyEnv("UPLOAD_LOCAL_DIR"); ok {
+		cfg.UploadLocalDir = strings.TrimSpace(value)
+	}
+	if value, ok := getNonEmptyEnv("UPLOAD_PUBLIC_BASE_URL"); ok {
+		cfg.UploadPublicBaseURL = strings.TrimSpace(value)
+	}
+	if value, ok := getNonEmptyEnv("UPLOAD_OSS_ENDPOINT"); ok {
+		cfg.UploadOSSEndpoint = strings.TrimSpace(value)
+	}
+	if value, ok := getNonEmptyEnv("UPLOAD_OSS_BUCKET"); ok {
+		cfg.UploadOSSBucket = strings.TrimSpace(value)
+	}
+	if value, ok := getNonEmptyEnv("UPLOAD_OSS_ACCESS_KEY_ID"); ok {
+		cfg.UploadOSSAccessKeyID = strings.TrimSpace(value)
+	}
+	if value, ok := getNonEmptyEnv("UPLOAD_OSS_ACCESS_KEY_SECRET"); ok {
+		cfg.UploadOSSAccessKeySecret = strings.TrimSpace(value)
+	}
+	if value, ok := getNonEmptyEnv("UPLOAD_OSS_PREFIX"); ok {
+		cfg.UploadOSSPrefix = strings.TrimSpace(value)
 	}
 
 	if value, ok, err := getOptionalIntEnv("DB_POOL_MAX_CONNS"); err != nil {
@@ -186,6 +254,25 @@ func validate(cfg Config) error {
 	}
 	if cfg.DBPoolMaxIdleTimeSec > cfg.DBPoolMaxLifetimeSec {
 		return fmt.Errorf("DB_POOL_MAX_IDLE_SEC must be <= DB_POOL_MAX_LIFETIME_SEC")
+	}
+
+	switch cfg.UploadStorageBackend {
+	case "local":
+		if strings.TrimSpace(cfg.UploadLocalDir) == "" {
+			return fmt.Errorf("UPLOAD_LOCAL_DIR is required when UPLOAD_STORAGE_BACKEND=local")
+		}
+	case "oss":
+		if strings.TrimSpace(cfg.UploadOSSEndpoint) == "" {
+			return fmt.Errorf("UPLOAD_OSS_ENDPOINT is required when UPLOAD_STORAGE_BACKEND=oss")
+		}
+		if strings.TrimSpace(cfg.UploadOSSBucket) == "" {
+			return fmt.Errorf("UPLOAD_OSS_BUCKET is required when UPLOAD_STORAGE_BACKEND=oss")
+		}
+		if strings.TrimSpace(cfg.UploadOSSAccessKeyID) == "" || strings.TrimSpace(cfg.UploadOSSAccessKeySecret) == "" {
+			return fmt.Errorf("UPLOAD_OSS_ACCESS_KEY_ID and UPLOAD_OSS_ACCESS_KEY_SECRET are required when UPLOAD_STORAGE_BACKEND=oss")
+		}
+	default:
+		return fmt.Errorf("UPLOAD_STORAGE_BACKEND must be one of: local, oss")
 	}
 
 	return nil

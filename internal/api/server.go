@@ -16,6 +16,7 @@ import (
 	"time"
 
 	apperrors "noovertime/internal/errors"
+	"noovertime/internal/storage"
 )
 
 var (
@@ -28,6 +29,7 @@ const (
 	requestIDHeader      = "X-Request-ID"
 	internalErrorCode    = "INTERNAL_ERROR"
 	internalErrorMessage = "internal server error"
+	uploadCleanupPeriod  = 12 * time.Hour
 )
 
 type requestIDContextKey struct{}
@@ -44,6 +46,8 @@ type healthResponse struct {
 	Database componentHealth `json:"database"`
 }
 
+type ServerOption func(*Server)
+
 // HealthChecker defines the dependency that can report health.
 type HealthChecker interface {
 	Health(ctx context.Context) error
@@ -56,10 +60,12 @@ type Server struct {
 	db                HealthChecker
 	migrationRateGate *migrationRateGate
 	now               func() time.Time
+	objectStore       storage.ObjectStore
+	localUploadDir    string
 }
 
 // NewServer builds an API server with the required dependencies.
-func NewServer(addr string, db HealthChecker) *Server {
+func NewServer(addr string, db HealthChecker, opts ...ServerOption) *Server {
 	mux := http.NewServeMux()
 	s := &Server{
 		mux:               mux,
@@ -67,11 +73,18 @@ func NewServer(addr string, db HealthChecker) *Server {
 		migrationRateGate: newMigrationRateGate(),
 		now:               time.Now,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
 
 	s.handle("/health", s.healthHandler)
 	s.handle(tokensIssuePath, s.tokenIssueHandler)
 	s.handle(tokensRotatePath, s.tokenRotateHandler)
 	s.handle("/api/v1/sync/commits", s.syncCommitsHandler)
+	if s.objectStore != nil {
+		s.handle(punchPhotoUploadPath, s.punchPhotoUploadHandler)
+		s.handle(logUploadPath, s.logUploadHandler)
+	}
 	s.handle("/api/v1/migrations/requests", s.migrationRequestsHandler)
 	s.handle(migrationsConfirmPathPattern, s.migrationConfirmHandler)
 	s.handle(migrationsTakeoverPath, pausedEndpointHandler("migration takeover"))
@@ -86,6 +99,9 @@ func NewServer(addr string, db HealthChecker) *Server {
 	s.handle(webDaySummariesQueryPath, s.webDaySummariesQueryHandler)
 
 	mux.Handle("/web/", http.StripPrefix("/web/", http.FileServer(http.Dir("./web"))))
+	if strings.TrimSpace(s.localUploadDir) != "" {
+		mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(s.localUploadDir))))
+	}
 	s.httpServer = &http.Server{
 		Addr:    addr,
 		Handler: s.requestIDMiddleware(s.requestLogMiddleware(s.recoveryMiddleware(mux))),
@@ -94,9 +110,24 @@ func NewServer(addr string, db HealthChecker) *Server {
 	return s
 }
 
+func WithObjectStore(store storage.ObjectStore) ServerOption {
+	return func(s *Server) {
+		s.objectStore = store
+	}
+}
+
+func WithLocalUploadDir(dir string) ServerOption {
+	return func(s *Server) {
+		s.localUploadDir = strings.TrimSpace(dir)
+	}
+}
+
 // Run starts the server and shuts it down gracefully on process signal.
 func (s *Server) Run() error {
 	errCh := make(chan error, 1)
+	cleanupStop := s.startUploadCleanupLoop()
+	defer cleanupStop()
+
 	go func() {
 		errCh <- listenAndServe(s.httpServer)
 	}()
@@ -119,6 +150,37 @@ func (s *Server) Run() error {
 		}
 		return err
 	}
+}
+
+func (s *Server) startUploadCleanupLoop() func() {
+	if s.objectStore == nil {
+		return func() {}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ticker := time.NewTicker(uploadCleanupPeriod)
+
+	go func() {
+		defer ticker.Stop()
+		s.runUploadCleanup(context.Background())
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.runUploadCleanup(ctx)
+			}
+		}
+	}()
+
+	return cancel
+}
+
+func (s *Server) runUploadCleanup(ctx context.Context) {
+	now := s.now().UTC().Truncate(time.Second)
+	cleanupExpiredPunchPhotoUploads(ctx, s.db, s.objectStore, now)
+	cleanupExpiredLogUploads(ctx, s.db, s.objectStore, now)
 }
 
 func (s *Server) handle(path string, handler appHandler) {
