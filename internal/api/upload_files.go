@@ -49,6 +49,7 @@ type punchPhotoUploadInput struct {
 
 type logUploadInput struct {
 	LogDate     time.Time
+	LogKind     string
 	File        multipart.File
 	FileHeader  *multipart.FileHeader
 	ContentType string
@@ -67,6 +68,7 @@ type uploadedObjectRecord struct {
 	LocalDate   time.Time
 	PunchType   string
 	LogDate     time.Time
+	LogKind     string
 }
 
 func (s *Server) punchPhotoUploadHandler(w http.ResponseWriter, r *http.Request) error {
@@ -151,7 +153,7 @@ func (s *Server) logUploadHandler(w http.ResponseWriter, r *http.Request) error 
 	defer cleanupMultipartForm(r)
 	defer input.File.Close()
 
-	objectKey := buildLogObjectKey(auth.UserID, auth.DeviceID, input.LogDate, input.ContentType, input.FileHeader.Filename)
+	objectKey := buildLogObjectKey(auth.UserID, auth.DeviceID, input.LogKind, input.LogDate, input.ContentType, input.FileHeader.Filename)
 	record, err := uploadIncomingFile(r.Context(), s.logStore, storage.PutRequest{
 		Key:         objectKey,
 		Body:        input.File,
@@ -173,6 +175,7 @@ func (s *Server) logUploadHandler(w http.ResponseWriter, r *http.Request) error 
 		UploadedAt:  now,
 		ExpiresAt:   expiresAt,
 		LogDate:     input.LogDate,
+		LogKind:     input.LogKind,
 	})
 	if err != nil {
 		return err
@@ -260,6 +263,10 @@ func parseLogUploadInput(w http.ResponseWriter, r *http.Request) (logUploadInput
 	if err != nil {
 		return logUploadInput{}, err
 	}
+	logKind, err := parseLogKindField(r.FormValue("log_kind"))
+	if err != nil {
+		return logUploadInput{}, err
+	}
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
@@ -277,6 +284,7 @@ func parseLogUploadInput(w http.ResponseWriter, r *http.Request) (logUploadInput
 
 	return logUploadInput{
 		LogDate:     logDate,
+		LogKind:     logKind,
 		File:        file,
 		FileHeader:  header,
 		ContentType: contentType,
@@ -321,6 +329,19 @@ func parsePunchTypeField(raw string) (string, error) {
 	}
 }
 
+func parseLogKindField(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "all":
+		return "all", nil
+	case "error":
+		return "error", nil
+	case "info":
+		return "info", nil
+	default:
+		return "", invalidArgument("log_kind must be all, error, or info")
+	}
+}
+
 func buildPunchPhotoObjectKey(userID string, localDate time.Time, punchRecordID, contentType, filename string) string {
 	return path.Join(
 		"punch-photos",
@@ -330,11 +351,12 @@ func buildPunchPhotoObjectKey(userID string, localDate time.Time, punchRecordID,
 	)
 }
 
-func buildLogObjectKey(userID, deviceID string, logDate time.Time, contentType, filename string) string {
+func buildLogObjectKey(userID, deviceID, logKind string, logDate time.Time, contentType, filename string) string {
 	return path.Join(
 		"logs",
 		userID,
 		deviceID,
+		logKind,
 		logDate.Format("2006-01-02")+uploadFileExtension(contentType, filename, ".log"),
 	)
 }
@@ -503,12 +525,14 @@ SELECT object_key
  WHERE user_id = $1::uuid
    AND device_id = $2::uuid
    AND log_date = $3::date
+   AND log_kind = $4
    AND deleted_at IS NULL
  LIMIT 1
 `,
 			record.UserID,
 			record.DeviceID,
 			record.LogDate.Format("2006-01-02"),
+			record.LogKind,
 		)
 		if err != nil {
 			return err
@@ -519,6 +543,7 @@ INSERT INTO app_log_uploads (
 	user_id,
 	device_id,
 	log_date,
+	log_kind,
 	object_key,
 	remote_url,
 	content_type,
@@ -537,10 +562,11 @@ INSERT INTO app_log_uploads (
 	$7,
 	$8,
 	$9,
+	$10,
 	NULL,
-	$8
+	$9
 )
-ON CONFLICT (user_id, device_id, log_date) DO UPDATE
+ON CONFLICT (user_id, device_id, log_date, log_kind) DO UPDATE
 SET object_key = EXCLUDED.object_key,
     remote_url = EXCLUDED.remote_url,
     content_type = EXCLUDED.content_type,
@@ -556,6 +582,7 @@ SET object_key = EXCLUDED.object_key,
 			record.UserID,
 			record.DeviceID,
 			record.LogDate.Format("2006-01-02"),
+			record.LogKind,
 			record.ObjectKey,
 			record.RemoteURL,
 			record.ContentType,

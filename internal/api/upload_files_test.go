@@ -122,6 +122,7 @@ func TestLogUploadUsesLogObjectStore(t *testing.T) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	_ = writer.WriteField("log_date", "2026-03-15")
+	_ = writer.WriteField("log_kind", "error")
 	part, err := writer.CreatePart(textproto.MIMEHeader{
 		"Content-Disposition": []string{`form-data; name="file"; filename="app.log"`},
 		"Content-Type":        []string{"text/plain; charset=utf-8"},
@@ -153,7 +154,7 @@ func TestLogUploadUsesLogObjectStore(t *testing.T) {
 	if len(logStore.puts) != 1 {
 		t.Fatalf("log store put count = %d", len(logStore.puts))
 	}
-	if logStore.puts[0].Key != "logs/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/2026-03-15.log" {
+	if logStore.puts[0].Key != "logs/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/error/2026-03-15.log" {
 		t.Fatalf("log object key = %q", logStore.puts[0].Key)
 	}
 }
@@ -177,6 +178,57 @@ func TestLogUploadRejectsNonTextFile(t *testing.T) {
 	part, err := writer.CreatePart(textproto.MIMEHeader{
 		"Content-Disposition": []string{`form-data; name="file"; filename="bad.png"`},
 		"Content-Type":        []string{"image/png"},
+	})
+	if err != nil {
+		t.Fatalf("CreatePart() error = %v", err)
+	}
+	if _, err := part.Write([]byte("not-a-log")); err != nil {
+		t.Fatalf("part.Write() error = %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("writer.Close() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, logUploadPath, body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	setSyncAuthHeader(req, auth.Token)
+	recorder := httptest.NewRecorder()
+
+	server.httpServer.Handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	var payload apperrors.ErrorResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.ErrorCode != invalidArgumentCode {
+		t.Fatalf("error_code = %q", payload.ErrorCode)
+	}
+}
+
+func TestLogUploadRejectsUnknownLogKind(t *testing.T) {
+	auth := mobileAuthContext{
+		Token:       "tok_test",
+		UserID:      "11111111-1111-1111-1111-111111111111",
+		DeviceID:    "22222222-2222-2222-2222-222222222222",
+		WriterEpoch: 1,
+		TokenStatus: mobileTokenBound,
+	}
+	server := NewServer("127.0.0.1:0", &fakeUploadDB{
+		auth: auth,
+		tx:   &fakeUploadTx{},
+	}, WithObjectStore(&fakeObjectStore{}))
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	_ = writer.WriteField("log_date", "2026-03-15")
+	_ = writer.WriteField("log_kind", "boom")
+	part, err := writer.CreatePart(textproto.MIMEHeader{
+		"Content-Disposition": []string{`form-data; name="file"; filename="app.log"`},
+		"Content-Type":        []string{"text/plain; charset=utf-8"},
 	})
 	if err != nil {
 		t.Fatalf("CreatePart() error = %v", err)
