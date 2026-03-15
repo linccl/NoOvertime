@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -60,8 +62,9 @@ type Server struct {
 	db                HealthChecker
 	migrationRateGate *migrationRateGate
 	now               func() time.Time
-	objectStore       storage.ObjectStore
-	localUploadDir    string
+	punchPhotoStore   storage.ObjectStore
+	logStore          storage.ObjectStore
+	localUploadDirs   []string
 }
 
 // NewServer builds an API server with the required dependencies.
@@ -81,8 +84,10 @@ func NewServer(addr string, db HealthChecker, opts ...ServerOption) *Server {
 	s.handle(tokensIssuePath, s.tokenIssueHandler)
 	s.handle(tokensRotatePath, s.tokenRotateHandler)
 	s.handle("/api/v1/sync/commits", s.syncCommitsHandler)
-	if s.objectStore != nil {
+	if s.punchPhotoStore != nil {
 		s.handle(punchPhotoUploadPath, s.punchPhotoUploadHandler)
+	}
+	if s.logStore != nil {
 		s.handle(logUploadPath, s.logUploadHandler)
 	}
 	s.handle("/api/v1/migrations/requests", s.migrationRequestsHandler)
@@ -99,8 +104,8 @@ func NewServer(addr string, db HealthChecker, opts ...ServerOption) *Server {
 	s.handle(webDaySummariesQueryPath, s.webDaySummariesQueryHandler)
 
 	mux.Handle("/web/", http.StripPrefix("/web/", http.FileServer(http.Dir("./web"))))
-	if strings.TrimSpace(s.localUploadDir) != "" {
-		mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(s.localUploadDir))))
+	if len(s.localUploadDirs) > 0 {
+		mux.Handle("/uploads/", http.StripPrefix("/uploads/", newUploadFileHandler(s.localUploadDirs)))
 	}
 	s.httpServer = &http.Server{
 		Addr:    addr,
@@ -112,13 +117,36 @@ func NewServer(addr string, db HealthChecker, opts ...ServerOption) *Server {
 
 func WithObjectStore(store storage.ObjectStore) ServerOption {
 	return func(s *Server) {
-		s.objectStore = store
+		s.punchPhotoStore = store
+		s.logStore = store
 	}
 }
 
 func WithLocalUploadDir(dir string) ServerOption {
+	return WithLocalUploadDirs(dir)
+}
+
+func WithPunchPhotoObjectStore(store storage.ObjectStore) ServerOption {
 	return func(s *Server) {
-		s.localUploadDir = strings.TrimSpace(dir)
+		s.punchPhotoStore = store
+	}
+}
+
+func WithLogObjectStore(store storage.ObjectStore) ServerOption {
+	return func(s *Server) {
+		s.logStore = store
+	}
+}
+
+func WithLocalUploadDirs(dirs ...string) ServerOption {
+	return func(s *Server) {
+		for _, dir := range dirs {
+			trimmed := strings.TrimSpace(dir)
+			if trimmed == "" || slicesContainsString(s.localUploadDirs, trimmed) {
+				continue
+			}
+			s.localUploadDirs = append(s.localUploadDirs, trimmed)
+		}
 	}
 }
 
@@ -153,7 +181,7 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) startUploadCleanupLoop() func() {
-	if s.objectStore == nil {
+	if s.punchPhotoStore == nil && s.logStore == nil {
 		return func() {}
 	}
 
@@ -179,8 +207,59 @@ func (s *Server) startUploadCleanupLoop() func() {
 
 func (s *Server) runUploadCleanup(ctx context.Context) {
 	now := s.now().UTC().Truncate(time.Second)
-	cleanupExpiredPunchPhotoUploads(ctx, s.db, s.objectStore, now)
-	cleanupExpiredLogUploads(ctx, s.db, s.objectStore, now)
+	if s.punchPhotoStore != nil {
+		cleanupExpiredPunchPhotoUploads(ctx, s.db, s.punchPhotoStore, now)
+	}
+	if s.logStore != nil {
+		cleanupExpiredLogUploads(ctx, s.db, s.logStore, now)
+	}
+}
+
+func newUploadFileHandler(roots []string) http.Handler {
+	normalized := make([]string, 0, len(roots))
+	for _, root := range roots {
+		trimmed := strings.TrimSpace(root)
+		if trimmed == "" || slicesContainsString(normalized, trimmed) {
+			continue
+		}
+		normalized = append(normalized, trimmed)
+	}
+	if len(normalized) == 1 {
+		return http.FileServer(http.Dir(normalized[0]))
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+		if key == "" || key == "." || strings.HasPrefix(key, "../") {
+			http.NotFound(w, r)
+			return
+		}
+		for _, root := range normalized {
+			targetPath := filepath.Join(root, filepath.FromSlash(key))
+			info, err := os.Stat(targetPath)
+			if err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				http.Error(w, "file lookup failed", http.StatusInternalServerError)
+				return
+			}
+			if info.IsDir() {
+				continue
+			}
+			http.ServeFile(w, r, targetPath)
+			return
+		}
+		http.NotFound(w, r)
+	})
+}
+
+func slicesContainsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handle(path string, handler appHandler) {

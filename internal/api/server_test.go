@@ -503,3 +503,25 @@ func TestUploadRoutesNotRegisteredWithoutObjectStore(t *testing.T) {
 		}
 	}
 }
+
+func TestUploadRoutesRegisterPerStore(t *testing.T) {
+	server := NewServer(
+		"127.0.0.1:0",
+		healthyDB{},
+		WithPunchPhotoObjectStore(&fakeObjectStore{}),
+	)
+
+	request := httptest.NewRequest(http.MethodPost, punchPhotoUploadPath, strings.NewReader(`{}`))
+	recorder := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(recorder, request)
+	if recorder.Code == http.StatusNotFound {
+		t.Fatalf("photo upload route should be registered")
+	}
+
+	request = httptest.NewRequest(http.MethodPost, logUploadPath, strings.NewReader(`{}`))
+	recorder = httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("log upload route status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}

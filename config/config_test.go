@@ -59,6 +59,53 @@ func TestLoadFromConfigFile(t *testing.T) {
 	}
 }
 
+func TestTargetUploadConfigInheritsDefaultAndOverridesBucket(t *testing.T) {
+	clearConfigEnvs(t)
+
+	configPath := writeTempConfig(t, `{
+		"database_dsn": "postgres://user:pass@localhost:5432/noovertime?sslmode=disable",
+		"upload_storage_backend": "oss",
+		"upload_public_base_url": "https://cdn.example.com/shared",
+		"upload_oss_endpoint": "https://oss-cn-hangzhou.aliyuncs.com",
+		"upload_oss_bucket": "shared-bucket",
+		"upload_oss_access_key_id": "ak",
+		"upload_oss_access_key_secret": "sk",
+		"upload_oss_prefix": "shared",
+		"punch_photo_upload_oss_bucket": "photo-bucket",
+		"punch_photo_upload_oss_prefix": "punch-photos",
+		"log_upload_oss_bucket": "log-bucket",
+		"log_upload_oss_prefix": "logs"
+	}`)
+	t.Setenv("CONFIG_FILE", configPath)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	photoCfg := cfg.PunchPhotoUploadStoreConfig()
+	if photoCfg.StorageBackend != "oss" {
+		t.Fatalf("photo backend = %q", photoCfg.StorageBackend)
+	}
+	if photoCfg.OSSBucket != "photo-bucket" {
+		t.Fatalf("photo bucket = %q", photoCfg.OSSBucket)
+	}
+	if photoCfg.OSSEndpoint != "https://oss-cn-hangzhou.aliyuncs.com" {
+		t.Fatalf("photo endpoint = %q", photoCfg.OSSEndpoint)
+	}
+	if photoCfg.PublicBaseURL != "https://cdn.example.com/shared" {
+		t.Fatalf("photo public base url = %q", photoCfg.PublicBaseURL)
+	}
+
+	logCfg := cfg.LogUploadStoreConfig()
+	if logCfg.OSSBucket != "log-bucket" {
+		t.Fatalf("log bucket = %q", logCfg.OSSBucket)
+	}
+	if logCfg.OSSPrefix != "logs" {
+		t.Fatalf("log prefix = %q", logCfg.OSSPrefix)
+	}
+}
+
 func TestLoadEnvOverridesConfigFile(t *testing.T) {
 	clearConfigEnvs(t)
 
@@ -179,6 +226,22 @@ func TestLoadRejectsIncompleteOSSConfig(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsIncompletePunchPhotoOSSConfig(t *testing.T) {
+	clearConfigEnvs(t)
+
+	t.Setenv("DATABASE_DSN", "postgres://user:pass@localhost:5432/noovertime?sslmode=disable")
+	t.Setenv("PUNCH_PHOTO_UPLOAD_STORAGE_BACKEND", "oss")
+	t.Setenv("PUNCH_PHOTO_UPLOAD_OSS_ENDPOINT", "https://oss-cn-hangzhou.aliyuncs.com")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "PUNCH_PHOTO_UPLOAD_OSS_BUCKET is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func clearConfigEnvs(t *testing.T) {
 	t.Helper()
 	keys := []string{
@@ -198,6 +261,22 @@ func clearConfigEnvs(t *testing.T) {
 		"UPLOAD_OSS_ACCESS_KEY_ID",
 		"UPLOAD_OSS_ACCESS_KEY_SECRET",
 		"UPLOAD_OSS_PREFIX",
+		"PUNCH_PHOTO_UPLOAD_STORAGE_BACKEND",
+		"PUNCH_PHOTO_UPLOAD_LOCAL_DIR",
+		"PUNCH_PHOTO_UPLOAD_PUBLIC_BASE_URL",
+		"PUNCH_PHOTO_UPLOAD_OSS_ENDPOINT",
+		"PUNCH_PHOTO_UPLOAD_OSS_BUCKET",
+		"PUNCH_PHOTO_UPLOAD_OSS_ACCESS_KEY_ID",
+		"PUNCH_PHOTO_UPLOAD_OSS_ACCESS_KEY_SECRET",
+		"PUNCH_PHOTO_UPLOAD_OSS_PREFIX",
+		"LOG_UPLOAD_STORAGE_BACKEND",
+		"LOG_UPLOAD_LOCAL_DIR",
+		"LOG_UPLOAD_PUBLIC_BASE_URL",
+		"LOG_UPLOAD_OSS_ENDPOINT",
+		"LOG_UPLOAD_OSS_BUCKET",
+		"LOG_UPLOAD_OSS_ACCESS_KEY_ID",
+		"LOG_UPLOAD_OSS_ACCESS_KEY_SECRET",
+		"LOG_UPLOAD_OSS_PREFIX",
 	}
 	for _, key := range keys {
 		t.Setenv(key, "")

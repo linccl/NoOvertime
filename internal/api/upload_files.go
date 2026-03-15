@@ -73,7 +73,7 @@ func (s *Server) punchPhotoUploadHandler(w http.ResponseWriter, r *http.Request)
 	if err := ensurePostMethod(r); err != nil {
 		return err
 	}
-	if s.objectStore == nil {
+	if s.punchPhotoStore == nil {
 		return fmt.Errorf("upload storage is not configured")
 	}
 
@@ -94,7 +94,7 @@ func (s *Server) punchPhotoUploadHandler(w http.ResponseWriter, r *http.Request)
 	defer input.File.Close()
 
 	objectKey := buildPunchPhotoObjectKey(auth.UserID, input.LocalDate, input.PunchRecordID, input.ContentType, input.FileHeader.Filename)
-	record, err := uploadIncomingFile(r.Context(), s.objectStore, storage.PutRequest{
+	record, err := uploadIncomingFile(r.Context(), s.punchPhotoStore, storage.PutRequest{
 		Key:         objectKey,
 		Body:        input.File,
 		ContentType: input.ContentType,
@@ -121,9 +121,9 @@ func (s *Server) punchPhotoUploadHandler(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		return err
 	}
-	cleanupReplacedUploadObject(r.Context(), s.objectStore, replacedObjectKey, record.Key)
+	cleanupReplacedUploadObject(r.Context(), s.punchPhotoStore, replacedObjectKey, record.Key)
 
-	cleanupExpiredPunchPhotoUploads(r.Context(), s.db, s.objectStore, now)
+	cleanupExpiredPunchPhotoUploads(r.Context(), s.db, s.punchPhotoStore, now)
 	return writeUploadFileResponse(w, r, record.Key, record.URL, expiresAt)
 }
 
@@ -131,7 +131,7 @@ func (s *Server) logUploadHandler(w http.ResponseWriter, r *http.Request) error 
 	if err := ensurePostMethod(r); err != nil {
 		return err
 	}
-	if s.objectStore == nil {
+	if s.logStore == nil {
 		return fmt.Errorf("upload storage is not configured")
 	}
 
@@ -152,7 +152,7 @@ func (s *Server) logUploadHandler(w http.ResponseWriter, r *http.Request) error 
 	defer input.File.Close()
 
 	objectKey := buildLogObjectKey(auth.UserID, auth.DeviceID, input.LogDate, input.ContentType, input.FileHeader.Filename)
-	record, err := uploadIncomingFile(r.Context(), s.objectStore, storage.PutRequest{
+	record, err := uploadIncomingFile(r.Context(), s.logStore, storage.PutRequest{
 		Key:         objectKey,
 		Body:        input.File,
 		ContentType: input.ContentType,
@@ -177,9 +177,9 @@ func (s *Server) logUploadHandler(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return err
 	}
-	cleanupReplacedUploadObject(r.Context(), s.objectStore, replacedObjectKey, record.Key)
+	cleanupReplacedUploadObject(r.Context(), s.logStore, replacedObjectKey, record.Key)
 
-	cleanupExpiredLogUploads(r.Context(), s.db, s.objectStore, now)
+	cleanupExpiredLogUploads(r.Context(), s.db, s.logStore, now)
 	return writeUploadFileResponse(w, r, record.Key, record.URL, expiresAt)
 }
 

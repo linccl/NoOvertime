@@ -97,6 +97,67 @@ func TestPunchPhotoUploadStoresObjectAndReturnsMetadata(t *testing.T) {
 	}
 }
 
+func TestLogUploadUsesLogObjectStore(t *testing.T) {
+	auth := mobileAuthContext{
+		Token:       "tok_test",
+		UserID:      "11111111-1111-1111-1111-111111111111",
+		DeviceID:    "22222222-2222-2222-2222-222222222222",
+		WriterEpoch: 1,
+		TokenStatus: mobileTokenBound,
+	}
+	db := &fakeUploadDB{
+		auth: auth,
+		tx:   &fakeUploadTx{},
+	}
+	photoStore := &fakeObjectStore{}
+	logStore := &fakeObjectStore{}
+	server := NewServer(
+		"127.0.0.1:0",
+		db,
+		WithPunchPhotoObjectStore(photoStore),
+		WithLogObjectStore(logStore),
+	)
+	server.now = func() time.Time { return time.Date(2026, 3, 15, 11, 0, 0, 0, time.UTC) }
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	_ = writer.WriteField("log_date", "2026-03-15")
+	part, err := writer.CreatePart(textproto.MIMEHeader{
+		"Content-Disposition": []string{`form-data; name="file"; filename="app.log"`},
+		"Content-Type":        []string{"text/plain; charset=utf-8"},
+	})
+	if err != nil {
+		t.Fatalf("CreatePart() error = %v", err)
+	}
+	if _, err := part.Write([]byte("log-line")); err != nil {
+		t.Fatalf("part.Write() error = %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("writer.Close() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, logUploadPath, body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set(requestIDHeader, "req-upload-log")
+	setSyncAuthHeader(req, auth.Token)
+	recorder := httptest.NewRecorder()
+
+	server.httpServer.Handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if len(photoStore.puts) != 0 {
+		t.Fatalf("photo store put count = %d", len(photoStore.puts))
+	}
+	if len(logStore.puts) != 1 {
+		t.Fatalf("log store put count = %d", len(logStore.puts))
+	}
+	if logStore.puts[0].Key != "logs/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/2026-03-15.log" {
+		t.Fatalf("log object key = %q", logStore.puts[0].Key)
+	}
+}
+
 func TestLogUploadRejectsNonTextFile(t *testing.T) {
 	auth := mobileAuthContext{
 		Token:       "tok_test",
