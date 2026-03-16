@@ -235,6 +235,37 @@ func TestSyncCommitsRouteFirstSuccessfulSyncBindsUserID(t *testing.T) {
 	}
 }
 
+func TestSyncCommitsRouteReturnsMembershipStatus(t *testing.T) {
+	db := newFakeSyncCommitTxDB()
+	db.setWriter(testUserID, testDeviceID, testWriterEpoch)
+	expiresAt := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	db.setMembership(testUserID, membershipTierMember, &expiresAt)
+
+	server := NewServer("127.0.0.1:0", db)
+	server.now = func() time.Time { return time.Date(2026, 3, 16, 2, 0, 0, 0, time.UTC) }
+	requestPayload := mustBuildPayloadWithComputedHash(t, nil)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, syncCommitsPath, strings.NewReader(requestPayload))
+	setSyncAuthHeader(req, testSyncToken)
+	server.httpServer.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var body syncCommitResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.MembershipTier != membershipTierMember {
+		t.Fatalf("membership_tier = %q", body.MembershipTier)
+	}
+	if body.MembershipExpiresAt == nil || *body.MembershipExpiresAt != expiresAt.Format(time.RFC3339) {
+		t.Fatalf("membership_expires_at = %v", body.MembershipExpiresAt)
+	}
+}
+
 func TestSyncCommitsRouteAppliedAndReplayNoop(t *testing.T) {
 	db := newFakeSyncCommitTxDB()
 	db.setWriter(testUserID, testDeviceID, testWriterEpoch)
@@ -1214,6 +1245,7 @@ type fakeSyncCommitTxDB struct {
 	committedTableCounts map[string]int
 	lastTx               *fakeSyncCommitTx
 	writer               map[string]fakeSyncCommitWriterState
+	memberships          map[string]fakeUserMembershipRecord
 	mobileTokens         map[string]fakeMobileTokenRecord
 	syncCommits          map[fakeSyncCommitKey]syncCommitGateRecord
 	businessVersions     map[string]map[fakeBusinessKey]int64
@@ -1223,6 +1255,7 @@ func newFakeSyncCommitTxDB() *fakeSyncCommitTxDB {
 	db := &fakeSyncCommitTxDB{
 		committedTableCounts: make(map[string]int),
 		writer:               make(map[string]fakeSyncCommitWriterState),
+		memberships:          make(map[string]fakeUserMembershipRecord),
 		mobileTokens:         make(map[string]fakeMobileTokenRecord),
 		syncCommits:          make(map[fakeSyncCommitKey]syncCommitGateRecord),
 		businessVersions: map[string]map[fakeBusinessKey]int64{
@@ -1242,6 +1275,13 @@ func (f *fakeSyncCommitTxDB) Health(context.Context) error {
 
 func (f *fakeSyncCommitTxDB) setWriter(userID, deviceID string, epoch int64) {
 	f.writer[userID] = fakeSyncCommitWriterState{deviceID: deviceID, epoch: epoch}
+}
+
+func (f *fakeSyncCommitTxDB) setMembership(userID, tier string, expiresAt *time.Time) {
+	f.memberships[userID] = fakeUserMembershipRecord{
+		Tier:      tier,
+		ExpiresAt: expiresAt,
+	}
 }
 
 func (f *fakeSyncCommitTxDB) seedMobileToken(token, userID, deviceID string, writerEpoch int64, status string) {
@@ -1292,6 +1332,7 @@ func (f *fakeSyncCommitTxDB) WithTx(ctx context.Context, fn func(tx pgx.Tx) erro
 		failTable:        f.failTable,
 		failErr:          f.failErr,
 		writer:           cloneWriterStates(f.writer),
+		memberships:      cloneFakeUserMembershipRecords(f.memberships),
 		mobileTokens:     cloneFakeMobileTokenRecords(f.mobileTokens),
 		syncCommits:      cloneSyncCommitMap(f.syncCommits),
 		businessVersions: cloneBusinessVersions(f.businessVersions),
@@ -1304,6 +1345,7 @@ func (f *fakeSyncCommitTxDB) WithTx(ctx context.Context, fn func(tx pgx.Tx) erro
 	}
 
 	f.writer = tx.writer
+	f.memberships = tx.memberships
 	f.mobileTokens = tx.mobileTokens
 	f.syncCommits = tx.syncCommits
 	f.businessVersions = tx.businessVersions
@@ -1323,6 +1365,7 @@ type fakeSyncCommitTx struct {
 	tables           []string
 	txIDs            []string
 	writer           map[string]fakeSyncCommitWriterState
+	memberships      map[string]fakeUserMembershipRecord
 	mobileTokens     map[string]fakeMobileTokenRecord
 	syncCommits      map[fakeSyncCommitKey]syncCommitGateRecord
 	businessVersions map[string]map[fakeBusinessKey]int64
@@ -1417,6 +1460,8 @@ func (f *fakeSyncCommitTx) QueryRow(_ context.Context, query string, args ...any
 		return f.queryRowInsertSyncCommitReturning(args)
 	case strings.Contains(query, "SELECT payload_hash, status, created_at") && strings.Contains(query, "FROM sync_commits"):
 		return f.queryRowLoadSyncCommit(args)
+	case strings.Contains(query, "membership_tier") && strings.Contains(query, "FROM users"):
+		return f.queryRowLoadUserMembership(args)
 	case strings.Contains(query, "SELECT version FROM"):
 		return f.queryRowSelectVersion(table, args)
 	case strings.Contains(query, "FROM mobile_tokens"):
@@ -1467,6 +1512,11 @@ func detectTable(query string) string {
 type fakeSyncCommitWriterState struct {
 	deviceID string
 	epoch    int64
+}
+
+type fakeUserMembershipRecord struct {
+	Tier      string
+	ExpiresAt *time.Time
 }
 
 type fakeSyncCommitKey struct {
@@ -1574,6 +1624,25 @@ func (f *fakeSyncCommitTx) queryRowLoadMobileToken(args []any) pgx.Row {
 		record.WriterEpoch,
 		record.Status,
 		record.FingerprintHash,
+	}}
+}
+
+func (f *fakeSyncCommitTx) queryRowLoadUserMembership(args []any) pgx.Row {
+	if len(args) < 1 {
+		return fakeRow{err: fmt.Errorf("expected user membership args, got %d", len(args))}
+	}
+	userID, _ := args[0].(string)
+	record, ok := f.memberships[userID]
+	if !ok {
+		record = fakeUserMembershipRecord{Tier: membershipTierFree}
+	}
+	var expiresAt any
+	if record.ExpiresAt != nil {
+		expiresAt = *record.ExpiresAt
+	}
+	return fakeRow{values: []any{
+		normalizeMembershipTier(record.Tier),
+		expiresAt,
 	}}
 }
 
@@ -1799,6 +1868,14 @@ func cloneSyncCommitMap(src map[fakeSyncCommitKey]syncCommitGateRecord) map[fake
 
 func cloneWriterStates(src map[string]fakeSyncCommitWriterState) map[string]fakeSyncCommitWriterState {
 	dst := make(map[string]fakeSyncCommitWriterState, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
+}
+
+func cloneFakeUserMembershipRecords(src map[string]fakeUserMembershipRecord) map[string]fakeUserMembershipRecord {
+	dst := make(map[string]fakeUserMembershipRecord, len(src))
 	for key, value := range src {
 		dst[key] = value
 	}

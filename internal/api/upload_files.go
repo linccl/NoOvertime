@@ -87,6 +87,9 @@ func (s *Server) punchPhotoUploadHandler(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		return err
 	}
+	if !isMembershipActive(auth.MembershipTier, auth.MembershipExpiresAt, s.now()) {
+		return membershipRequired()
+	}
 
 	input, err := parsePunchPhotoUploadInput(w, r)
 	if err != nil {
@@ -188,7 +191,12 @@ func (s *Server) logUploadHandler(w http.ResponseWriter, r *http.Request) error 
 
 func resolveUploadAuthContext(ctx context.Context, db HealthChecker, header mobileTokenHeader) (mobileAuthContext, error) {
 	if resolver, ok := db.(mobileAuthDirectResolver); ok {
-		return resolver.resolveMobileAuthContextDirect(header)
+		auth, err := resolver.resolveMobileAuthContextDirect(header)
+		if err != nil {
+			return mobileAuthContext{}, err
+		}
+		auth.MembershipTier = normalizeMembershipTier(auth.MembershipTier)
+		return auth, nil
 	}
 
 	txDB, ok := db.(uploadAuthResolverDB)
@@ -206,6 +214,12 @@ func resolveUploadAuthContext(ctx context.Context, db HealthChecker, header mobi
 		if err != nil {
 			return err
 		}
+		membership, err := loadUserMembership(ctx, tx, loaded.UserID)
+		if err != nil {
+			return err
+		}
+		loaded.MembershipTier = membership.Tier
+		loaded.MembershipExpiresAt = membership.ExpiresAt
 		auth = loaded
 		return nil
 	})

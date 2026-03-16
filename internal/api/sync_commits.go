@@ -173,11 +173,13 @@ type MonthSummaryInput struct {
 }
 
 type syncCommitResponse struct {
-	RequestID  string               `json:"request_id"`
-	GateResult string               `json:"gate_result"`
-	GateReason string               `json:"gate_reason"`
-	UserID     string               `json:"user_id"`
-	SyncCommit syncCommitResultBody `json:"sync_commit"`
+	RequestID           string               `json:"request_id"`
+	GateResult          string               `json:"gate_result"`
+	GateReason          string               `json:"gate_reason"`
+	UserID              string               `json:"user_id"`
+	MembershipTier      string               `json:"membership_tier"`
+	MembershipExpiresAt *string              `json:"membership_expires_at,omitempty"`
+	SyncCommit          syncCommitResultBody `json:"sync_commit"`
 }
 
 type syncCommitResultBody struct {
@@ -201,11 +203,13 @@ type syncCommitGateRecord struct {
 }
 
 type syncCommitGateDecision struct {
-	Result    string
-	Reason    string
-	Record    syncCommitGateRecord
-	ErrorCode string
-	Message   string
+	Result              string
+	Reason              string
+	Record              syncCommitGateRecord
+	ErrorCode           string
+	Message             string
+	MembershipTier      string
+	MembershipExpiresAt *time.Time
 }
 
 func gateAndPersistSyncCommit(
@@ -222,6 +226,8 @@ func gateAndPersistSyncCommit(
 
 	resolvedInput := input
 	var decision syncCommitGateDecision
+	var membershipTier string
+	var membershipExpiresAt *time.Time
 	if err := txDB.WithTx(ctx, func(tx pgx.Tx) error {
 		auth, err := loadMobileAuthContext(ctx, tx, header, true)
 		if err != nil {
@@ -235,6 +241,12 @@ func gateAndPersistSyncCommit(
 		resolvedInput.UserID = auth.UserID
 		resolvedInput.DeviceID = auth.DeviceID
 		resolvedInput.WriterEpoch = auth.WriterEpoch
+		membership, err := loadUserMembership(ctx, tx, auth.UserID)
+		if err != nil {
+			return err
+		}
+		membershipTier = membership.Tier
+		membershipExpiresAt = membership.ExpiresAt
 
 		createdAt := now.UTC()
 		record, inserted, err := tryInsertSyncCommitRecord(ctx, tx, resolvedInput, createdAt)
@@ -249,18 +261,22 @@ func gateAndPersistSyncCommit(
 			}
 			if existing.PayloadHash == resolvedInput.PayloadHash {
 				decision = syncCommitGateDecision{
-					Result: gateResultNoop,
-					Reason: gateReasonReplayNoop,
-					Record: existing,
+					Result:              gateResultNoop,
+					Reason:              gateReasonReplayNoop,
+					Record:              existing,
+					MembershipTier:      membershipTier,
+					MembershipExpiresAt: membershipExpiresAt,
 				}
 				return nil
 			}
 			decision = syncCommitGateDecision{
-				Result:    gateResultRejected,
-				Reason:    gateReasonSyncIDConflict,
-				Record:    existing,
-				ErrorCode: syncIDConflictCode,
-				Message:   "same sync_id but different payload_hash",
+				Result:              gateResultRejected,
+				Reason:              gateReasonSyncIDConflict,
+				Record:              existing,
+				ErrorCode:           syncIDConflictCode,
+				Message:             "same sync_id but different payload_hash",
+				MembershipTier:      membershipTier,
+				MembershipExpiresAt: membershipExpiresAt,
 			}
 			return nil
 		}
@@ -275,9 +291,11 @@ func gateAndPersistSyncCommit(
 		}
 		if !shouldApply {
 			decision = syncCommitGateDecision{
-				Result: gateResultNoop,
-				Reason: gateReasonLowOrEqual,
-				Record: record,
+				Result:              gateResultNoop,
+				Reason:              gateReasonLowOrEqual,
+				Record:              record,
+				MembershipTier:      membershipTier,
+				MembershipExpiresAt: membershipExpiresAt,
 			}
 			return nil
 		}
@@ -297,9 +315,11 @@ func gateAndPersistSyncCommit(
 		}
 
 		decision = syncCommitGateDecision{
-			Result: gateResultApplied,
-			Reason: gateReasonAppliedWrite,
-			Record: record,
+			Result:              gateResultApplied,
+			Reason:              gateReasonAppliedWrite,
+			Record:              record,
+			MembershipTier:      membershipTier,
+			MembershipExpiresAt: membershipExpiresAt,
 		}
 		return nil
 	}); err != nil {
@@ -479,16 +499,26 @@ func (s *Server) syncCommitsHandler(w http.ResponseWriter, r *http.Request) erro
 
 	w.WriteHeader(http.StatusOK)
 	return json.NewEncoder(w).Encode(syncCommitResponse{
-		RequestID:  requestID,
-		GateResult: decision.Result,
-		GateReason: decision.Reason,
-		UserID:     resolvedInput.UserID,
+		RequestID:           requestID,
+		GateResult:          decision.Result,
+		GateReason:          decision.Reason,
+		UserID:              resolvedInput.UserID,
+		MembershipTier:      normalizeMembershipTier(decision.MembershipTier),
+		MembershipExpiresAt: formatOptionalRFC3339Ptr(decision.MembershipExpiresAt),
 		SyncCommit: syncCommitResultBody{
 			SyncID:    resolvedInput.SyncID,
 			Status:    decision.Record.Status,
 			CreatedAt: decision.Record.CreatedAt.UTC().Format(time.RFC3339),
 		},
 	})
+}
+
+func formatOptionalRFC3339Ptr(value *time.Time) *string {
+	if value == nil {
+		return nil
+	}
+	formatted := value.UTC().Format(time.RFC3339)
+	return &formatted
 }
 
 func parseSyncCommitInput(reader io.Reader) (SyncCommitInput, error) {

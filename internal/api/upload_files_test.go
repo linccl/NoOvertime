@@ -22,11 +22,12 @@ import (
 
 func TestPunchPhotoUploadStoresObjectAndReturnsMetadata(t *testing.T) {
 	auth := mobileAuthContext{
-		Token:       "tok_test",
-		UserID:      "11111111-1111-1111-1111-111111111111",
-		DeviceID:    "22222222-2222-2222-2222-222222222222",
-		WriterEpoch: 1,
-		TokenStatus: mobileTokenBound,
+		Token:          "tok_test",
+		UserID:         "11111111-1111-1111-1111-111111111111",
+		DeviceID:       "22222222-2222-2222-2222-222222222222",
+		WriterEpoch:    1,
+		TokenStatus:    mobileTokenBound,
+		MembershipTier: membershipTierMember,
 	}
 	db := &fakeUploadDB{
 		auth: auth,
@@ -38,7 +39,7 @@ func TestPunchPhotoUploadStoresObjectAndReturnsMetadata(t *testing.T) {
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	_ = writer.WriteField("punch_record_id", "33333333-3333-3333-3333-333333333333")
+	_ = writer.WriteField("punch_record_id", "33333333-3333-3333-8333-333333333333")
 	_ = writer.WriteField("local_date", "2026-03-15")
 	_ = writer.WriteField("punch_type", "START")
 	part, err := writer.CreatePart(textproto.MIMEHeader{
@@ -86,7 +87,7 @@ func TestPunchPhotoUploadStoresObjectAndReturnsMetadata(t *testing.T) {
 	if payload.RequestID != "req-upload-photo" {
 		t.Fatalf("request_id = %q", payload.RequestID)
 	}
-	if payload.ObjectKey != "punch-photos/11111111-1111-1111-1111-111111111111/2026-03-15/33333333-3333-3333-3333-333333333333.jpg" {
+	if payload.ObjectKey != "punch-photos/11111111-1111-1111-1111-111111111111/2026-03-15/33333333-3333-3333-8333-333333333333.jpg" {
 		t.Fatalf("object_key = %q", payload.ObjectKey)
 	}
 	if payload.URL != "https://uploads.example.com/"+payload.ObjectKey {
@@ -97,13 +98,66 @@ func TestPunchPhotoUploadStoresObjectAndReturnsMetadata(t *testing.T) {
 	}
 }
 
-func TestLogUploadUsesLogObjectStore(t *testing.T) {
+func TestPunchPhotoUploadRequiresMembership(t *testing.T) {
 	auth := mobileAuthContext{
 		Token:       "tok_test",
 		UserID:      "11111111-1111-1111-1111-111111111111",
 		DeviceID:    "22222222-2222-2222-2222-222222222222",
 		WriterEpoch: 1,
 		TokenStatus: mobileTokenBound,
+	}
+	server := NewServer("127.0.0.1:0", &fakeUploadDB{
+		auth: auth,
+		tx:   &fakeUploadTx{},
+	}, WithObjectStore(&fakeObjectStore{}))
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	_ = writer.WriteField("punch_record_id", "33333333-3333-3333-8333-333333333333")
+	_ = writer.WriteField("local_date", "2026-03-15")
+	_ = writer.WriteField("punch_type", "START")
+	part, err := writer.CreatePart(textproto.MIMEHeader{
+		"Content-Disposition": []string{`form-data; name="file"; filename="start.jpg"`},
+		"Content-Type":        []string{"image/jpeg"},
+	})
+	if err != nil {
+		t.Fatalf("CreatePart() error = %v", err)
+	}
+	if _, err := part.Write([]byte("jpeg-bytes")); err != nil {
+		t.Fatalf("part.Write() error = %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("writer.Close() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, punchPhotoUploadPath, body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	setSyncAuthHeader(req, auth.Token)
+	recorder := httptest.NewRecorder()
+
+	server.httpServer.Handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	var payload apperrors.ErrorResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.ErrorCode != membershipRequiredCode {
+		t.Fatalf("error_code = %q", payload.ErrorCode)
+	}
+}
+
+func TestLogUploadUsesLogObjectStore(t *testing.T) {
+	auth := mobileAuthContext{
+		Token:          "tok_test",
+		UserID:         "11111111-1111-1111-1111-111111111111",
+		DeviceID:       "22222222-2222-2222-2222-222222222222",
+		WriterEpoch:    1,
+		TokenStatus:    mobileTokenBound,
+		MembershipTier: membershipTierMember,
 	}
 	db := &fakeUploadDB{
 		auth: auth,
@@ -161,11 +215,12 @@ func TestLogUploadUsesLogObjectStore(t *testing.T) {
 
 func TestLogUploadRejectsNonTextFile(t *testing.T) {
 	auth := mobileAuthContext{
-		Token:       "tok_test",
-		UserID:      "11111111-1111-1111-1111-111111111111",
-		DeviceID:    "22222222-2222-2222-2222-222222222222",
-		WriterEpoch: 1,
-		TokenStatus: mobileTokenBound,
+		Token:          "tok_test",
+		UserID:         "11111111-1111-1111-1111-111111111111",
+		DeviceID:       "22222222-2222-2222-2222-222222222222",
+		WriterEpoch:    1,
+		TokenStatus:    mobileTokenBound,
+		MembershipTier: membershipTierMember,
 	}
 	server := NewServer("127.0.0.1:0", &fakeUploadDB{
 		auth: auth,
@@ -211,11 +266,12 @@ func TestLogUploadRejectsNonTextFile(t *testing.T) {
 
 func TestLogUploadRejectsUnknownLogKind(t *testing.T) {
 	auth := mobileAuthContext{
-		Token:       "tok_test",
-		UserID:      "11111111-1111-1111-1111-111111111111",
-		DeviceID:    "22222222-2222-2222-2222-222222222222",
-		WriterEpoch: 1,
-		TokenStatus: mobileTokenBound,
+		Token:          "tok_test",
+		UserID:         "11111111-1111-1111-1111-111111111111",
+		DeviceID:       "22222222-2222-2222-2222-222222222222",
+		WriterEpoch:    1,
+		TokenStatus:    mobileTokenBound,
+		MembershipTier: membershipTierMember,
 	}
 	server := NewServer("127.0.0.1:0", &fakeUploadDB{
 		auth: auth,
@@ -262,13 +318,14 @@ func TestLogUploadRejectsUnknownLogKind(t *testing.T) {
 
 func TestPunchPhotoUploadDeletesPreviousObjectWhenKeyChanges(t *testing.T) {
 	auth := mobileAuthContext{
-		Token:       "tok_test",
-		UserID:      "11111111-1111-1111-1111-111111111111",
-		DeviceID:    "22222222-2222-2222-2222-222222222222",
-		WriterEpoch: 1,
-		TokenStatus: mobileTokenBound,
+		Token:          "tok_test",
+		UserID:         "11111111-1111-1111-1111-111111111111",
+		DeviceID:       "22222222-2222-2222-2222-222222222222",
+		WriterEpoch:    1,
+		TokenStatus:    mobileTokenBound,
+		MembershipTier: membershipTierMember,
 	}
-	oldObjectKey := "punch-photos/11111111-1111-1111-1111-111111111111/2026-03-15/33333333-3333-3333-3333-333333333333.png"
+	oldObjectKey := "punch-photos/11111111-1111-1111-1111-111111111111/2026-03-15/33333333-3333-3333-8333-333333333333.png"
 	db := &fakeUploadDB{
 		auth: auth,
 		tx: &fakeUploadTx{
@@ -283,7 +340,7 @@ func TestPunchPhotoUploadDeletesPreviousObjectWhenKeyChanges(t *testing.T) {
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	_ = writer.WriteField("punch_record_id", "33333333-3333-3333-3333-333333333333")
+	_ = writer.WriteField("punch_record_id", "33333333-3333-3333-8333-333333333333")
 	_ = writer.WriteField("local_date", "2026-03-15")
 	_ = writer.WriteField("punch_type", "START")
 	part, err := writer.CreatePart(textproto.MIMEHeader{

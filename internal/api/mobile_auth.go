@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	apperrors "noovertime/internal/errors"
 
@@ -36,6 +37,8 @@ type mobileAuthContext struct {
 	DeviceID              string
 	WriterEpoch           int64
 	TokenStatus           string
+	MembershipTier        string
+	MembershipExpiresAt   *time.Time
 }
 
 // parseBearerToken extracts a standard Authorization Bearer token.
