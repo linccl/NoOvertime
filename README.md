@@ -10,6 +10,8 @@ NoOvertime 后端服务（Go + PostgreSQL），当前有效核心接口如下：
 - `POST /api/v1/migrations/{migration_request_id}/confirm`
 - `POST /api/v1/web/month-summaries/query`
 - `POST /api/v1/web/day-summaries/query`
+- `POST /api/v1/punch-photos/upload`
+- `POST /api/v1/logs/upload`
 
 自 2026-03-14 起，以下旧流程已暂停，保留路由但统一返回 `410 FEATURE_PAUSED`：
 
@@ -65,6 +67,44 @@ export DATABASE_DSN='postgres://<user>:<password>@localhost:5432/no_overtime?ssl
 go run ./cmd/api
 ```
 
+## 推荐生产部署
+
+生产环境建议使用固定二进制 + `systemd` 常驻服务，不再直接使用临时 `go run` 进程。
+
+### 1. 构建固定二进制
+
+```bash
+go build -o bin/noovertime-api ./cmd/api
+```
+
+### 2. 生产配置文件
+
+建议通过 `CONFIG_FILE` 指向单独的 JSON 配置文件，例如：
+
+```bash
+CONFIG_FILE=/root/lincc/lincc-project/NoOvertime/config.production.json
+```
+
+### 3. systemd 服务示例
+
+```ini
+[Unit]
+Description=NoOvertime API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/lincc/lincc-project/NoOvertime
+Environment=CONFIG_FILE=/root/lincc/lincc-project/NoOvertime/config.production.json
+ExecStart=/root/lincc/lincc-project/NoOvertime/bin/noovertime-api
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
 ### 5. Web 看板（静态页）
 
 启动后访问：
@@ -112,6 +152,11 @@ curl -i -X POST 'http://127.0.0.1:29082/api/v1/sync/commits' \
 ```
 
 更多接口语义、错误码与 gate 字段说明见：`docs/API使用说明.md`。若要查看安卓端最新 token-only 改造对 API 端的输入，请优先阅读 `docs/安卓端TokenOnly改造对API端总览.md`。首次成功同步后，服务端会在响应中回填 `user_id`。
+
+自 2026-03-16 起，`sync/commits` 还会回填会员信息，供客户端控制照片同步开关：
+
+- `membership_tier`
+- `membership_expires_at`
 
 ### Web 只读查询（token-only）
 
@@ -167,3 +212,11 @@ curl -i -X POST 'http://127.0.0.1:29082/api/v1/web/day-summaries/query' \
 - `STALE_WRITER_REJECTED`
 
 所有错误响应均包含 `request_id` 便于链路追踪。
+
+## 会员与上传
+
+- 照片上传要求当前用户为有效会员；非会员会收到 `403 MEMBERSHIP_REQUIRED`
+- 日志上传不要求会员
+- 生产已使用 `db/migrations/005_user_membership.sql` 为 `users` 表增加：
+  - `membership_tier`
+  - `membership_expires_at`
