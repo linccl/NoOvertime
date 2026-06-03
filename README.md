@@ -5,6 +5,7 @@ NoOvertime 后端服务（Go + PostgreSQL），当前有效核心接口如下：
 - `GET /health`
 - `POST /api/v1/tokens/issue`
 - `POST /api/v1/tokens/rotate`
+- `GET/PUT/DELETE /api/v1/notification-settings`
 - `POST /api/v1/sync/commits`
 - `POST /api/v1/migrations/requests`
 - `POST /api/v1/migrations/{migration_request_id}/confirm`
@@ -60,6 +61,13 @@ export DATABASE_DSN='postgres://<user>:<password>@localhost:5432/no_overtime?ssl
 | `DB_POOL_MAX_LIFETIME_SEC` | 否 | `3600` | 连接最大生命周期（秒） |
 | `DB_POOL_MAX_IDLE_SEC` | 否 | `300` | 连接最大空闲时长（秒） |
 | `CONFIG_FILE` | 否 | 无 | JSON 配置文件路径（先读文件，再由环境变量覆盖） |
+| `REMINDER_WORKER_ENABLED` | 否 | `false` | 是否启用服务端下班/调休提醒 worker |
+| `REMINDER_SCAN_INTERVAL_SECONDS` | 否 | `60` | worker 扫描间隔 |
+| `REMINDER_BATCH_SIZE` | 否 | `100` | 单次 claim 事件数量 |
+| `REMINDER_HTTP_TIMEOUT_SECONDS` | 否 | `10` | webhook 请求超时 |
+| `REMINDER_MAX_RETRY_COUNT` | 否 | `3` | 失败最大尝试次数 |
+| `REMINDER_RETRY_BACKOFF_SECONDS` | 否 | `60` | 失败重试退避时间 |
+| `REMINDER_MAX_ADJUST_MINUTES` | 否 | `300` | 最大调休提醒分钟数，30..300 且步长 30 |
 
 ### 4. 启动服务
 
@@ -157,6 +165,16 @@ curl -i -X POST 'http://127.0.0.1:29082/api/v1/sync/commits' \
 
 - `membership_tier`
 - `membership_expires_at`
+
+### 服务端提醒配置
+
+Android 端本地拿到通知 webhook 的 `notification_url` 与 `notification_token` 后，需要用当前移动端 Bearer token 调用后端：
+
+- `PUT /api/v1/notification-settings`：保存或覆盖当前用户的通知配置
+- `GET /api/v1/notification-settings`：读取是否已配置，只返回脱敏 URL，不返回明文 token
+- `DELETE /api/v1/notification-settings`：关闭服务端提醒，并取消未发送事件
+
+服务端不会主动读取 Android 本地配置。只有 Android 调用 `PUT /api/v1/notification-settings` 后，后端 worker 才能复用数据库中的 URL/token 发送提醒。worker 默认关闭，需设置 `REMINDER_WORKER_ENABLED=true`。
 
 ### Web 只读查询（token-only）
 

@@ -1439,6 +1439,8 @@ func (f *fakeSyncCommitTx) Exec(_ context.Context, query string, args ...any) (p
 		if err := f.execBindTokensByDevice(args); err != nil {
 			return pgconn.CommandTag{}, err
 		}
+	case strings.Contains(query, "INSERT INTO punch_reminder_events"):
+	case strings.Contains(query, "UPDATE punch_reminder_events"):
 	default:
 		return pgconn.CommandTag{}, fmt.Errorf("unsupported exec query: %s", query)
 	}
@@ -1466,6 +1468,12 @@ func (f *fakeSyncCommitTx) QueryRow(_ context.Context, query string, args ...any
 		return f.queryRowSelectVersion(table, args)
 	case strings.Contains(query, "FROM mobile_tokens"):
 		return f.queryRowLoadMobileToken(args)
+	case strings.Contains(query, "FROM punch_records") && strings.Contains(query, "SELECT type::text"):
+		return fakeRow{err: pgx.ErrNoRows}
+	case strings.Contains(query, "FROM punch_records") && strings.Contains(query, "SELECT 1"):
+		return fakeRow{err: pgx.ErrNoRows}
+	case strings.Contains(query, "FROM punch_records") && strings.Contains(query, "SELECT id::text"):
+		return fakeRow{err: pgx.ErrNoRows}
 	default:
 		return fakeRow{err: fmt.Errorf("unsupported query: %s", query)}
 	}
@@ -1492,6 +1500,10 @@ func detectTable(query string) string {
 		return "users"
 	case strings.Contains(query, "UPDATE mobile_tokens"):
 		return "mobile_tokens"
+	case strings.Contains(query, "INSERT INTO punch_reminder_events"):
+		return "punch_reminder_events"
+	case strings.Contains(query, "UPDATE punch_reminder_events"):
+		return "punch_reminder_events"
 	case strings.Contains(query, "FROM punch_records"):
 		return "punch_records"
 	case strings.Contains(query, "FROM leave_records"):

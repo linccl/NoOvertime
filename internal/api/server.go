@@ -83,6 +83,7 @@ func NewServer(addr string, db HealthChecker, opts ...ServerOption) *Server {
 	s.handle("/health", s.healthHandler)
 	s.handle(tokensIssuePath, s.tokenIssueHandler)
 	s.handle(tokensRotatePath, s.tokenRotateHandler)
+	s.handle(notificationSettingsPath, s.notificationSettingsHandler)
 	s.handle("/api/v1/sync/commits", s.syncCommitsHandler)
 	if s.punchPhotoStore != nil {
 		s.handle(punchPhotoUploadPath, s.punchPhotoUploadHandler)

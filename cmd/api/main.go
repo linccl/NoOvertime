@@ -4,10 +4,12 @@ import (
 	"context"
 	"log"
 	"strings"
+	"time"
 
 	"noovertime/config"
 	"noovertime/internal/api"
 	"noovertime/internal/db"
+	"noovertime/internal/reminders"
 	"noovertime/internal/storage"
 )
 
@@ -42,6 +44,24 @@ func main() {
 	logStore, logLocalDir, err := newUploadStore(cfg.LogUploadStoreConfig())
 	if err != nil {
 		log.Fatalf("init log upload storage: %v", err)
+	}
+
+	if cfg.ReminderWorkerEnabled {
+		workerCfg := reminders.Config{
+			ScanInterval: time.Duration(cfg.ReminderScanIntervalSec) * time.Second,
+			BatchSize:    cfg.ReminderBatchSize,
+			HTTPTimeout:  time.Duration(cfg.ReminderHTTPTimeoutSec) * time.Second,
+			MaxRetry:     cfg.ReminderMaxRetryCount,
+			RetryBackoff: time.Duration(cfg.ReminderRetryBackoffSec) * time.Second,
+		}
+		worker := reminders.NewWorker(reminders.NewPGStore(dbClient), nil, workerCfg)
+		workerCtx, cancelWorker := context.WithCancel(context.Background())
+		defer cancelWorker()
+		go func() {
+			if err := worker.Run(workerCtx); err != nil && err != context.Canceled {
+				log.Printf("reminder worker stopped: %v", err)
+			}
+		}()
 	}
 
 	server := api.NewServer(

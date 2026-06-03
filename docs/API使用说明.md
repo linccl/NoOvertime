@@ -5,6 +5,7 @@
 - `GET /health`
 - `POST /api/v1/tokens/issue`
 - `POST /api/v1/tokens/rotate`
+- `GET/PUT/DELETE /api/v1/notification-settings`
 - `POST /api/v1/sync/commits`
 - `POST /api/v1/migrations/requests`
 - `POST /api/v1/migrations/{migration_request_id}/confirm`
@@ -182,7 +183,90 @@ curl -i -X POST 'http://127.0.0.1:29082/api/v1/web/day-summaries/query' \
 - 可选传入 Header `X-Client-Fingerprint`。
 - 不再支持 `binding_token` / `client_fingerprint` 请求体鉴权。
 
-## 5. gate 字段语义
+## 5. 服务端提醒配置：`/api/v1/notification-settings`
+
+Android 端如果在本地配置了通知 webhook，需要主动把 `notification_url` 和 `notification_token` 通过此接口保存到后端；后端不会读取 Android 本地配置。服务端 worker 发送提醒时复用这里保存的 URL/token。
+
+所有 notification-settings 请求都只使用当前移动端 Bearer token 鉴权，不接受 `X-User-ID` / `X-Device-ID` / `X-Writer-Epoch` 作为授权身份。
+
+### 5.1 PUT 保存或覆盖配置
+
+```bash
+curl -i -X PUT 'http://127.0.0.1:29082/api/v1/notification-settings' \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <mobile_token>' \
+  -H 'X-Request-ID: req-notify-put-001' \
+  -d '{
+    "server_end_reminder_enabled": true,
+    "notification_url": "https://notify.example.com/<webhook-path>",
+    "notification_token": "<notification_token>"
+  }'
+```
+
+约束：
+
+- `notification_url` 必须是 HTTPS。
+- `notification_token` 必填。
+- 后写覆盖前写，`config_version` 递增。
+- 当 `server_end_reminder_enabled=false` 时，后端会取消该用户未发送的提醒事件，已发送事件保留。
+
+### 5.2 GET 查询配置状态
+
+```bash
+curl -i -X GET 'http://127.0.0.1:29082/api/v1/notification-settings' \
+  -H 'Authorization: Bearer <mobile_token>' \
+  -H 'X-Request-ID: req-notify-get-001'
+```
+
+响应示例：
+
+```json
+{
+  "server_end_reminder_enabled": true,
+  "notification_url_masked": "https://notify.example.com/...",
+  "notification_configured": true,
+  "config_version": 2,
+  "updated_at": "2026-06-03T01:02:03Z"
+}
+```
+
+GET 不返回明文 `notification_token`，也不返回完整敏感 URL。
+
+### 5.3 DELETE 关闭配置
+
+```bash
+curl -i -X DELETE 'http://127.0.0.1:29082/api/v1/notification-settings' \
+  -H 'Authorization: Bearer <mobile_token>' \
+  -H 'X-Request-ID: req-notify-delete-001'
+```
+
+DELETE 会关闭服务端提醒，并将该用户未发送事件标记为 `CANCELLED`，`cancel_reason=CONFIG_DISABLED`。
+
+## 6. 服务端提醒 worker
+
+worker 运行在 API 进程内，默认关闭：
+
+| 环境变量 | 默认值 | 说明 |
+|---|---:|---|
+| `REMINDER_WORKER_ENABLED` | `false` | 是否启用 worker |
+| `REMINDER_SCAN_INTERVAL_SECONDS` | `60` | 扫描间隔 |
+| `REMINDER_BATCH_SIZE` | `100` | 单次 claim 数量 |
+| `REMINDER_HTTP_TIMEOUT_SECONDS` | `10` | webhook 超时 |
+| `REMINDER_MAX_RETRY_COUNT` | `3` | 最大尝试次数 |
+| `REMINDER_RETRY_BACKOFF_SECONDS` | `60` | 重试退避秒数 |
+| `REMINDER_MAX_ADJUST_MINUTES` | `300` | 最大调休提醒分钟数 |
+
+worker 发送协议：
+
+- `POST <notification_url>`
+- `Content-Type: text/plain; charset=utf-8`
+- `Authorization: Bearer <notification_token>`
+- `X-Idempotency-Key: <event_id>`
+- body 为三行文本提醒内容。
+
+START 生效后生成 11 个提醒点：8h59 下班提醒，以及 9h29 到 13h59 每 30 分钟一次的调休提醒；不会生成 14h29/330 分钟事件。END 到达后，后续未发送事件会取消。
+
+## 7. gate 字段语义
 
 `gate_result`：
 
@@ -197,7 +281,7 @@ curl -i -X POST 'http://127.0.0.1:29082/api/v1/web/day-summaries/query' \
 - `LOW_OR_EQUAL_VERSION`
 - `SYNC_ID_CONFLICT`
 
-## 6. 主要错误码语义
+## 8. 主要错误码语义
 
 | error_code | 说明 |
 |---|---|

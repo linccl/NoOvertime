@@ -19,6 +19,13 @@ const (
 	defaultDBPoolMaxIdleSec     = 300
 	defaultUploadStorageBackend = "local"
 	defaultUploadLocalDir       = "./uploads-data"
+	defaultReminderWorker       = false
+	defaultReminderScanSec      = 60
+	defaultReminderBatchSize    = 100
+	defaultReminderHTTPSec      = 10
+	defaultReminderRetryMax     = 3
+	defaultReminderBackoffSec   = 60
+	defaultReminderMaxAdjustMin = 300
 )
 
 type UploadStoreConfig struct {
@@ -65,6 +72,13 @@ type Config struct {
 	LogUploadOSSAccessKeyID            string
 	LogUploadOSSAccessKeySecret        string
 	LogUploadOSSPrefix                 string
+	ReminderWorkerEnabled              bool
+	ReminderScanIntervalSec            int
+	ReminderBatchSize                  int
+	ReminderHTTPTimeoutSec             int
+	ReminderMaxRetryCount              int
+	ReminderRetryBackoffSec            int
+	ReminderMaxAdjustMinutes           int
 }
 
 type fileConfig struct {
@@ -99,19 +113,33 @@ type fileConfig struct {
 	LogUploadOSSAccessKeyID            *string `json:"log_upload_oss_access_key_id"`
 	LogUploadOSSAccessKeySecret        *string `json:"log_upload_oss_access_key_secret"`
 	LogUploadOSSPrefix                 *string `json:"log_upload_oss_prefix"`
+	ReminderWorkerEnabled              *bool   `json:"reminder_worker_enabled"`
+	ReminderScanIntervalSec            *int    `json:"reminder_scan_interval_seconds"`
+	ReminderBatchSize                  *int    `json:"reminder_batch_size"`
+	ReminderHTTPTimeoutSec             *int    `json:"reminder_http_timeout_seconds"`
+	ReminderMaxRetryCount              *int    `json:"reminder_max_retry_count"`
+	ReminderRetryBackoffSec            *int    `json:"reminder_retry_backoff_seconds"`
+	ReminderMaxAdjustMinutes           *int    `json:"reminder_max_adjust_minutes"`
 }
 
 // Load reads configuration from config file first, then environment variables.
 func Load() (Config, error) {
 	cfg := Config{
-		HTTPAddr:             defaultHTTPAddr,
-		LogLevel:             defaultLogLevel,
-		DBPoolMaxConns:       defaultDBPoolMaxConns,
-		DBPoolMinConns:       defaultDBPoolMinConns,
-		DBPoolMaxLifetimeSec: defaultDBPoolMaxLifetimeSec,
-		DBPoolMaxIdleTimeSec: defaultDBPoolMaxIdleSec,
-		UploadStorageBackend: defaultUploadStorageBackend,
-		UploadLocalDir:       defaultUploadLocalDir,
+		HTTPAddr:                 defaultHTTPAddr,
+		LogLevel:                 defaultLogLevel,
+		DBPoolMaxConns:           defaultDBPoolMaxConns,
+		DBPoolMinConns:           defaultDBPoolMinConns,
+		DBPoolMaxLifetimeSec:     defaultDBPoolMaxLifetimeSec,
+		DBPoolMaxIdleTimeSec:     defaultDBPoolMaxIdleSec,
+		UploadStorageBackend:     defaultUploadStorageBackend,
+		UploadLocalDir:           defaultUploadLocalDir,
+		ReminderWorkerEnabled:    defaultReminderWorker,
+		ReminderScanIntervalSec:  defaultReminderScanSec,
+		ReminderBatchSize:        defaultReminderBatchSize,
+		ReminderHTTPTimeoutSec:   defaultReminderHTTPSec,
+		ReminderMaxRetryCount:    defaultReminderRetryMax,
+		ReminderRetryBackoffSec:  defaultReminderBackoffSec,
+		ReminderMaxAdjustMinutes: defaultReminderMaxAdjustMin,
 	}
 
 	if configPath, ok := getNonEmptyEnv("CONFIG_FILE"); ok {
@@ -248,6 +276,27 @@ func applyFileConfig(cfg *Config, raw fileConfig) {
 	if raw.LogUploadOSSPrefix != nil {
 		cfg.LogUploadOSSPrefix = strings.TrimSpace(*raw.LogUploadOSSPrefix)
 	}
+	if raw.ReminderWorkerEnabled != nil {
+		cfg.ReminderWorkerEnabled = *raw.ReminderWorkerEnabled
+	}
+	if raw.ReminderScanIntervalSec != nil {
+		cfg.ReminderScanIntervalSec = *raw.ReminderScanIntervalSec
+	}
+	if raw.ReminderBatchSize != nil {
+		cfg.ReminderBatchSize = *raw.ReminderBatchSize
+	}
+	if raw.ReminderHTTPTimeoutSec != nil {
+		cfg.ReminderHTTPTimeoutSec = *raw.ReminderHTTPTimeoutSec
+	}
+	if raw.ReminderMaxRetryCount != nil {
+		cfg.ReminderMaxRetryCount = *raw.ReminderMaxRetryCount
+	}
+	if raw.ReminderRetryBackoffSec != nil {
+		cfg.ReminderRetryBackoffSec = *raw.ReminderRetryBackoffSec
+	}
+	if raw.ReminderMaxAdjustMinutes != nil {
+		cfg.ReminderMaxAdjustMinutes = *raw.ReminderMaxAdjustMinutes
+	}
 }
 
 func applyEnvOverrides(cfg *Config) error {
@@ -353,6 +402,41 @@ func applyEnvOverrides(cfg *Config) error {
 	} else if ok {
 		cfg.DBPoolMaxIdleTimeSec = value
 	}
+	if value, ok, err := getOptionalBoolEnv("REMINDER_WORKER_ENABLED"); err != nil {
+		return err
+	} else if ok {
+		cfg.ReminderWorkerEnabled = value
+	}
+	if value, ok, err := getOptionalIntEnv("REMINDER_SCAN_INTERVAL_SECONDS"); err != nil {
+		return err
+	} else if ok {
+		cfg.ReminderScanIntervalSec = value
+	}
+	if value, ok, err := getOptionalIntEnv("REMINDER_BATCH_SIZE"); err != nil {
+		return err
+	} else if ok {
+		cfg.ReminderBatchSize = value
+	}
+	if value, ok, err := getOptionalIntEnv("REMINDER_HTTP_TIMEOUT_SECONDS"); err != nil {
+		return err
+	} else if ok {
+		cfg.ReminderHTTPTimeoutSec = value
+	}
+	if value, ok, err := getOptionalIntEnv("REMINDER_MAX_RETRY_COUNT"); err != nil {
+		return err
+	} else if ok {
+		cfg.ReminderMaxRetryCount = value
+	}
+	if value, ok, err := getOptionalIntEnv("REMINDER_RETRY_BACKOFF_SECONDS"); err != nil {
+		return err
+	} else if ok {
+		cfg.ReminderRetryBackoffSec = value
+	}
+	if value, ok, err := getOptionalIntEnv("REMINDER_MAX_ADJUST_MINUTES"); err != nil {
+		return err
+	} else if ok {
+		cfg.ReminderMaxAdjustMinutes = value
+	}
 
 	return nil
 }
@@ -403,6 +487,24 @@ func validate(cfg Config) error {
 	}
 	if err := validateUploadStoreConfig("LOG_UPLOAD", cfg.LogUploadStoreConfig()); err != nil {
 		return err
+	}
+	if cfg.ReminderScanIntervalSec <= 0 {
+		return fmt.Errorf("REMINDER_SCAN_INTERVAL_SECONDS must be > 0")
+	}
+	if cfg.ReminderBatchSize <= 0 {
+		return fmt.Errorf("REMINDER_BATCH_SIZE must be > 0")
+	}
+	if cfg.ReminderHTTPTimeoutSec <= 0 {
+		return fmt.Errorf("REMINDER_HTTP_TIMEOUT_SECONDS must be > 0")
+	}
+	if cfg.ReminderMaxRetryCount < 0 {
+		return fmt.Errorf("REMINDER_MAX_RETRY_COUNT must be >= 0")
+	}
+	if cfg.ReminderRetryBackoffSec <= 0 {
+		return fmt.Errorf("REMINDER_RETRY_BACKOFF_SECONDS must be > 0")
+	}
+	if cfg.ReminderMaxAdjustMinutes < 30 || cfg.ReminderMaxAdjustMinutes > 300 || cfg.ReminderMaxAdjustMinutes%30 != 0 {
+		return fmt.Errorf("REMINDER_MAX_ADJUST_MINUTES must be one of 30..300 step 30")
 	}
 
 	return nil
@@ -518,6 +620,18 @@ func getOptionalIntEnv(key string) (int, bool, error) {
 	value, err := strconv.Atoi(raw)
 	if err != nil {
 		return 0, false, fmt.Errorf("%s must be an integer", key)
+	}
+	return value, true, nil
+}
+
+func getOptionalBoolEnv(key string) (bool, bool, error) {
+	raw, ok := getNonEmptyEnv(key)
+	if !ok {
+		return false, false, nil
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, false, fmt.Errorf("%s must be a boolean", key)
 	}
 	return value, true, nil
 }

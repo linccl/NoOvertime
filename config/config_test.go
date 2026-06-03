@@ -24,7 +24,14 @@ func TestLoadFromConfigFile(t *testing.T) {
 		"upload_oss_bucket": "noovertime-test",
 		"upload_oss_access_key_id": "ak",
 		"upload_oss_access_key_secret": "sk",
-		"upload_oss_prefix": "prod/mobile"
+		"upload_oss_prefix": "prod/mobile",
+		"reminder_worker_enabled": true,
+		"reminder_scan_interval_seconds": 30,
+		"reminder_batch_size": 50,
+		"reminder_http_timeout_seconds": 8,
+		"reminder_max_retry_count": 5,
+		"reminder_retry_backoff_seconds": 45,
+		"reminder_max_adjust_minutes": 240
 	}`)
 	t.Setenv("CONFIG_FILE", configPath)
 
@@ -56,6 +63,18 @@ func TestLoadFromConfigFile(t *testing.T) {
 	}
 	if cfg.UploadOSSPrefix != "prod/mobile" {
 		t.Fatalf("UploadOSSPrefix = %q", cfg.UploadOSSPrefix)
+	}
+	if !cfg.ReminderWorkerEnabled {
+		t.Fatal("ReminderWorkerEnabled = false")
+	}
+	if cfg.ReminderScanIntervalSec != 30 || cfg.ReminderBatchSize != 50 {
+		t.Fatalf("reminder scan/batch = %d/%d", cfg.ReminderScanIntervalSec, cfg.ReminderBatchSize)
+	}
+	if cfg.ReminderHTTPTimeoutSec != 8 || cfg.ReminderMaxRetryCount != 5 {
+		t.Fatalf("reminder http/retry = %d/%d", cfg.ReminderHTTPTimeoutSec, cfg.ReminderMaxRetryCount)
+	}
+	if cfg.ReminderRetryBackoffSec != 45 || cfg.ReminderMaxAdjustMinutes != 240 {
+		t.Fatalf("reminder backoff/adjust = %d/%d", cfg.ReminderRetryBackoffSec, cfg.ReminderMaxAdjustMinutes)
 	}
 }
 
@@ -125,6 +144,8 @@ func TestLoadEnvOverridesConfigFile(t *testing.T) {
 	t.Setenv("DB_POOL_MAX_CONNS", "25")
 	t.Setenv("UPLOAD_STORAGE_BACKEND", "local")
 	t.Setenv("UPLOAD_LOCAL_DIR", "/tmp/noovertime-uploads")
+	t.Setenv("REMINDER_WORKER_ENABLED", "true")
+	t.Setenv("REMINDER_SCAN_INTERVAL_SECONDS", "15")
 
 	cfg, err := Load()
 	if err != nil {
@@ -148,6 +169,44 @@ func TestLoadEnvOverridesConfigFile(t *testing.T) {
 	}
 	if cfg.UploadLocalDir != "/tmp/noovertime-uploads" {
 		t.Fatalf("UploadLocalDir = %q", cfg.UploadLocalDir)
+	}
+	if !cfg.ReminderWorkerEnabled {
+		t.Fatal("ReminderWorkerEnabled = false")
+	}
+	if cfg.ReminderScanIntervalSec != 15 {
+		t.Fatalf("ReminderScanIntervalSec = %d", cfg.ReminderScanIntervalSec)
+	}
+}
+
+func TestLoadReminderDefaults(t *testing.T) {
+	clearConfigEnvs(t)
+
+	t.Setenv("DATABASE_DSN", "postgres://user:pass@localhost:5432/noovertime?sslmode=disable")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.ReminderWorkerEnabled {
+		t.Fatal("ReminderWorkerEnabled = true")
+	}
+	if cfg.ReminderScanIntervalSec != 60 {
+		t.Fatalf("ReminderScanIntervalSec = %d", cfg.ReminderScanIntervalSec)
+	}
+	if cfg.ReminderBatchSize != 100 {
+		t.Fatalf("ReminderBatchSize = %d", cfg.ReminderBatchSize)
+	}
+	if cfg.ReminderHTTPTimeoutSec != 10 {
+		t.Fatalf("ReminderHTTPTimeoutSec = %d", cfg.ReminderHTTPTimeoutSec)
+	}
+	if cfg.ReminderMaxRetryCount != 3 {
+		t.Fatalf("ReminderMaxRetryCount = %d", cfg.ReminderMaxRetryCount)
+	}
+	if cfg.ReminderRetryBackoffSec != 60 {
+		t.Fatalf("ReminderRetryBackoffSec = %d", cfg.ReminderRetryBackoffSec)
+	}
+	if cfg.ReminderMaxAdjustMinutes != 300 {
+		t.Fatalf("ReminderMaxAdjustMinutes = %d", cfg.ReminderMaxAdjustMinutes)
 	}
 }
 
@@ -207,6 +266,83 @@ func TestLoadRejectsInvalidIntEnv(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "DB_POOL_MAX_CONNS must be an integer") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadRejectsInvalidBoolEnv(t *testing.T) {
+	clearConfigEnvs(t)
+
+	t.Setenv("DATABASE_DSN", "postgres://user:pass@localhost:5432/noovertime?sslmode=disable")
+	t.Setenv("REMINDER_WORKER_ENABLED", "maybe")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "REMINDER_WORKER_ENABLED must be a boolean") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadRejectsInvalidReminderConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		key     string
+		value   string
+		message string
+	}{
+		{
+			name:    "scan interval",
+			key:     "REMINDER_SCAN_INTERVAL_SECONDS",
+			value:   "0",
+			message: "REMINDER_SCAN_INTERVAL_SECONDS must be > 0",
+		},
+		{
+			name:    "batch size",
+			key:     "REMINDER_BATCH_SIZE",
+			value:   "0",
+			message: "REMINDER_BATCH_SIZE must be > 0",
+		},
+		{
+			name:    "http timeout",
+			key:     "REMINDER_HTTP_TIMEOUT_SECONDS",
+			value:   "0",
+			message: "REMINDER_HTTP_TIMEOUT_SECONDS must be > 0",
+		},
+		{
+			name:    "retry count",
+			key:     "REMINDER_MAX_RETRY_COUNT",
+			value:   "-1",
+			message: "REMINDER_MAX_RETRY_COUNT must be >= 0",
+		},
+		{
+			name:    "backoff",
+			key:     "REMINDER_RETRY_BACKOFF_SECONDS",
+			value:   "0",
+			message: "REMINDER_RETRY_BACKOFF_SECONDS must be > 0",
+		},
+		{
+			name:    "max adjust",
+			key:     "REMINDER_MAX_ADJUST_MINUTES",
+			value:   "330",
+			message: "REMINDER_MAX_ADJUST_MINUTES must be one of 30..300 step 30",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearConfigEnvs(t)
+			t.Setenv("DATABASE_DSN", "postgres://user:pass@localhost:5432/noovertime?sslmode=disable")
+			t.Setenv(tt.key, tt.value)
+
+			_, err := Load()
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.message) {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
 	}
 }
 
@@ -277,6 +413,13 @@ func clearConfigEnvs(t *testing.T) {
 		"LOG_UPLOAD_OSS_ACCESS_KEY_ID",
 		"LOG_UPLOAD_OSS_ACCESS_KEY_SECRET",
 		"LOG_UPLOAD_OSS_PREFIX",
+		"REMINDER_WORKER_ENABLED",
+		"REMINDER_SCAN_INTERVAL_SECONDS",
+		"REMINDER_BATCH_SIZE",
+		"REMINDER_HTTP_TIMEOUT_SECONDS",
+		"REMINDER_MAX_RETRY_COUNT",
+		"REMINDER_RETRY_BACKOFF_SECONDS",
+		"REMINDER_MAX_ADJUST_MINUTES",
 	}
 	for _, key := range keys {
 		t.Setenv(key, "")

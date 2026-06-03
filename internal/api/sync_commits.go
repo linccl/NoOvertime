@@ -300,9 +300,16 @@ func gateAndPersistSyncCommit(
 			return nil
 		}
 
+		punchReminderSnapshots, err := loadPunchReminderSnapshots(ctx, tx, resolvedInput)
+		if err != nil {
+			return fmt.Errorf("load punch reminder snapshots: %w", err)
+		}
 		exec := pgxSyncCommitTxExecutor{tx: tx}
 		if err := writePunchRecords(ctx, exec, resolvedInput); err != nil {
 			return fmt.Errorf("write punch_records: %w", err)
+		}
+		if err := maintainPunchReminderEvents(ctx, tx, resolvedInput.UserID, resolvedInput.PunchRecords, punchReminderSnapshots, now.UTC()); err != nil {
+			return fmt.Errorf("maintain punch reminder events: %w", err)
 		}
 		if err := writeLeaveRecords(ctx, exec, resolvedInput); err != nil {
 			return fmt.Errorf("write leave_records: %w", err)
